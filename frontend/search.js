@@ -132,15 +132,29 @@ searchBtn.addEventListener("click", async () => {
   try {
     const result = await postJSON("/api/search/run", {});
     const sourceErrors = result.source_errors || [];
+    const jobErrors = result.errors || [];
     const parts = [`${result.found} job(s) found`, `${result.processed.length} new`];
-    if (result.errors.length) parts.push(`${result.errors.length} failed`);
+    if (jobErrors.length) parts.push(`${jobErrors.length} failed`);
     if (sourceErrors.length) parts.push(`${sourceErrors.length} source(s) unreachable`);
     let text = parts.join(", ") + ".";
     if (sourceErrors.length) {
       text += " " + sourceErrors.map((e) => `${e.source}:${e.identifier || "?"} — ${e.error}`).join("; ");
     }
+    if (jobErrors.length) {
+      // The same failure (e.g. a bad LLM config) usually repeats across
+      // every job, so group by message instead of listing all of them.
+      const counts = new Map();
+      jobErrors.forEach((e) => {
+        const msg = e.error || "Unknown error";
+        counts.set(msg, (counts.get(msg) || 0) + 1);
+      });
+      const summary = [...counts.entries()]
+        .map(([msg, count]) => (count > 1 ? `${msg} (x${count})` : msg))
+        .join("; ");
+      text += ` Job failures: ${summary}`;
+    }
     searchMessage.textContent = text;
-    searchMessage.className = (result.errors.length || sourceErrors.length)
+    searchMessage.className = (jobErrors.length || sourceErrors.length)
       ? "save-message search-message save-error"
       : "save-message search-message save-success";
   } catch (e) {
