@@ -159,10 +159,17 @@ nav bar on every page:
 - **Search** (`search.html`) — configures what the search-and-apply pipeline
   looks for, in three parts:
   - **Position** — a job title/keyword, saved to `.env`
-    (`SEARCH_POSITION_QUERY`). Used as the literal query for SerpAPI/Google
-    Jobs, and as a case-insensitive title filter applied to every other
-    source (Greenhouse, Lever, watchlist, added sites). Leave blank to pull
+    (`SEARCH_POSITION_QUERY`). Used as part of the SerpAPI/Google Jobs query,
+    and as a case-insensitive title filter applied to every other source
+    (Greenhouse, Lever, watchlist, added sites). Leave blank to pull
     everything configured with no filter.
+  - **Seniority** — a dropdown (Intern, Entry Level, Mid Level, Senior, Lead,
+    Manager), saved to `.env` (`SEARCH_SENIORITY_LEVEL`). Also folded into
+    the SerpAPI query, and matched against every other source's job titles
+    via keyword heuristics (`agents/search_agent.py::SENIORITY_KEYWORDS` --
+    e.g. "senior"/"sr." for Senior, "intern" for Intern; Mid Level matches
+    titles with none of those keywords, since unlabeled titles are usually
+    mid-level in practice). It's a heuristic, not an exact classification.
   - **Job boards** — add any website URL. Greenhouse/Lever URLs are detected
     automatically and searched via their public APIs, same as the
     `.env`-configured boards; any other URL falls back to a best-effort

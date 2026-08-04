@@ -10,12 +10,24 @@ function fmtDate(iso) {
 // ---- position ---------------------------------------------------------
 
 const positionInput = document.getElementById("position-input");
+const seniorityInput = document.getElementById("seniority-input");
 const positionMessage = document.getElementById("position-message");
 
 async function loadPosition() {
   try {
     const cfg = await getJSON("/api/search/config");
     positionInput.value = cfg.position_query || "";
+
+    // Seniority options come from the backend (agents/search_agent.py's
+    // SENIORITY_LABELS) so the dropdown can't drift out of sync with what
+    // the filter actually understands.
+    (cfg.seniority_levels || []).forEach(({ value, label }) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = label;
+      seniorityInput.appendChild(opt);
+    });
+    seniorityInput.value = cfg.seniority_level || "";
   } catch (e) {
     positionMessage.textContent = "Could not reach the backend API.";
     positionMessage.className = "save-message save-error";
@@ -27,7 +39,10 @@ document.getElementById("position-form").addEventListener("submit", async (e) =>
   positionMessage.textContent = "Saving…";
   positionMessage.className = "save-message";
   try {
-    await postJSON("/api/search/config", { position_query: positionInput.value.trim() });
+    await postJSON("/api/search/config", {
+      position_query: positionInput.value.trim(),
+      seniority_level: seniorityInput.value,
+    });
     positionMessage.textContent = "Saved.";
     positionMessage.className = "save-message save-success";
   } catch (err) {

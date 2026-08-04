@@ -56,12 +56,17 @@ def _process_one_job(session, raw_job: dict, cv_text: str) -> dict:
     return {"title": job_row.title, "company": job_row.company, "status": app_row.status}
 
 
-def run_daily_search_and_apply(cv_path: str | None = None, position: str | None = None) -> dict:
+def run_daily_search_and_apply(
+    cv_path: str | None = None,
+    position: str | None = None,
+    seniority: str | None = None,
+) -> dict:
     """
-    `position` defaults to config.SEARCH_POSITION_QUERY (the value saved from
-    the Search tab) when not explicitly passed, so the 8am scheduler run and
-    any CLI invocation automatically stay in sync with whatever's saved --
-    only pass it explicitly to override for a single run.
+    `position`/`seniority` default to config.SEARCH_POSITION_QUERY/
+    SEARCH_SENIORITY_LEVEL (the values saved from the Search tab) when not
+    explicitly passed, so the 8am scheduler run and any CLI invocation
+    automatically stay in sync with whatever's saved -- only pass them
+    explicitly to override for a single run.
     """
     init_db()
     cv_path = cv_path or find_default_cv("cv")
@@ -72,7 +77,8 @@ def run_daily_search_and_apply(cv_path: str | None = None, position: str | None 
         )
     cv_text = parse_cv(cv_path)
     position = position if position is not None else config.SEARCH_POSITION_QUERY
-    found, source_errors = run_search(position=position)
+    seniority = seniority if seniority is not None else config.SEARCH_SENIORITY_LEVEL
+    found, source_errors = run_search(position=position, seniority=seniority)
 
     processed = []
     errors = []

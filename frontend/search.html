@@ -38,15 +38,23 @@
           <label for="position-input">Position</label>
           <input type="text" id="position-input" placeholder="e.g. Backend Engineer — leave blank to search everything with no title filter">
         </div>
+        <div class="form-field">
+          <label for="seniority-input">Seniority</label>
+          <select id="seniority-input">
+            <option value="">Any</option>
+          </select>
+        </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save</button>
           <span id="position-message" class="save-message"></span>
         </div>
       </form>
       <p class="note">
-        Used as the search query for Google Jobs (needs <code>SERPAPI_KEY</code>),
-        and as a title filter applied to every Greenhouse/Lever/watchlist/site
-        result. Saved to <code>.env</code> — both the button below and the
+        Both are used as the search query for Google Jobs (needs
+        <code>SERPAPI_KEY</code>), and as a title filter applied to every
+        Greenhouse/Lever/watchlist/site result -- seniority via keyword
+        matching (e.g. "senior", "staff", "junior"), so it's a heuristic, not
+        exact. Saved to <code>.env</code> — both the button below and the
         scheduler's automatic 8am run use whatever's saved here.
       </p>
     </section>

@@ -35,6 +35,10 @@ LEVER_COMPANY_SLUGS = _list("LEVER_COMPANY_SLUGS")
 # sync with whatever the user last saved. Blank means "no title filter".
 SEARCH_POSITION_QUERY = os.getenv("SEARCH_POSITION_QUERY", "")
 
+# Seniority filter: one of "" (any), "intern", "entry", "mid", "senior",
+# "lead", "manager". Same sync behavior as SEARCH_POSITION_QUERY above.
+SEARCH_SENIORITY_LEVEL = os.getenv("SEARCH_SENIORITY_LEVEL", "")
+
 # Google Sheets watchlist
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "credentials/service_account.json")

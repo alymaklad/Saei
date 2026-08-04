@@ -23,7 +23,7 @@ import config
 import cv_parser
 import env_store
 from agents import email_agent
-from agents.search_agent import parse_site_url
+from agents.search_agent import parse_site_url, SENIORITY_LABELS
 from db import get_session, init_db
 from jobs.daily_run import run_daily_search_and_apply
 from models import Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog, SearchSite
@@ -463,19 +463,36 @@ def delete_search_site(site_id: int):
 
 class SearchConfigUpdate(BaseModel):
     position_query: str
+    seniority_level: str = ""
 
 
 @app.get("/api/search/config")
 def get_search_config():
-    return {"position_query": config.SEARCH_POSITION_QUERY}
+    return {
+        "position_query": config.SEARCH_POSITION_QUERY,
+        "seniority_level": config.SEARCH_SENIORITY_LEVEL,
+        "seniority_levels": [{"value": k, "label": v} for k, v in SENIORITY_LABELS.items()],
+    }
 
 
 @app.post("/api/search/config")
 def update_search_config(body: SearchConfigUpdate):
-    env_store.update_env_file({"SEARCH_POSITION_QUERY": body.position_query.strip()})
-    os.environ["SEARCH_POSITION_QUERY"] = body.position_query.strip()
+    seniority = body.seniority_level.strip()
+    if seniority and seniority not in SENIORITY_LABELS:
+        raise HTTPException(400, f"seniority_level must be one of: {', '.join(SENIORITY_LABELS)} (or blank)")
+
+    updates = {
+        "SEARCH_POSITION_QUERY": body.position_query.strip(),
+        "SEARCH_SENIORITY_LEVEL": seniority,
+    }
+    env_store.update_env_file(updates)
+    for key, value in updates.items():
+        os.environ[key] = value
     importlib.reload(config)
-    return {"position_query": config.SEARCH_POSITION_QUERY}
+    return {
+        "position_query": config.SEARCH_POSITION_QUERY,
+        "seniority_level": config.SEARCH_SENIORITY_LEVEL,
+    }
 
 
 @app.post("/api/search/run")

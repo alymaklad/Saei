@@ -29,6 +29,33 @@ GENERIC_SITE_MAX_CANDIDATES = 15
 GENERIC_SITE_TIMEOUT = 10
 GENERIC_SITE_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; JobApplicationAgent/1.0)"}
 
+# Seniority filter: job titles are matched against these keyword lists.
+# "mid" has no reliable keyword of its own -- most unlabeled titles ("Software
+# Engineer" with no qualifier) are mid-level in practice, so it's treated as
+# "doesn't match any other level's keywords" rather than its own positive list.
+SENIORITY_KEYWORDS = {
+    "intern": ["intern", "internship", "co-op", "coop"],
+    "entry": ["entry level", "entry-level", "junior", "jr.", "new grad", "new-grad", "graduate"],
+    "senior": ["senior", "sr."],
+    "lead": ["lead", "staff", "principal", "architect"],
+    "manager": ["manager", "director", "head of", "vice president", " vp ", "chief"],
+}
+SENIORITY_LABELS = {
+    "intern": "Intern",
+    "entry": "Entry Level",
+    "mid": "Mid Level",
+    "senior": "Senior",
+    "lead": "Lead",
+    "manager": "Manager",
+}
+
+
+def _matches_seniority(title: str, level: str) -> bool:
+    haystack = (title or "").lower()
+    if level == "mid":
+        return not any(kw in haystack for kws in SENIORITY_KEYWORDS.values() for kw in kws)
+    return any(kw in haystack for kw in SENIORITY_KEYWORDS.get(level, []))
+
 
 def parse_site_url(url: str) -> tuple[str, str | None]:
     """
@@ -184,14 +211,17 @@ def get_configured_sites() -> list[dict]:
         return [{"url": r.url, "site_type": r.site_type, "identifier": r.identifier} for r in rows]
 
 
-def run_search(position: str = "") -> tuple[list[dict], list[dict]]:
+def run_search(position: str = "", seniority: str = "") -> tuple[list[dict], list[dict]]:
     """
     Pulls from every configured free source and tags each job with its
-    source. `position` (a job title/keyword) is used two ways: as the literal
+    source. `position` (a job title/keyword) is used two ways: as part of the
     SerpAPI query, and as a case-insensitive title filter applied to every
     other source (Greenhouse/Lever/watchlist/dashboard-added sites) so one
-    field controls relevance everywhere. Leave blank to pull everything
-    configured with no title filter.
+    field controls relevance everywhere. `seniority` (one of "intern",
+    "entry", "mid", "senior", "lead", "manager") works the same way -- also
+    folded into the SerpAPI query, and matched against titles via keyword
+    heuristics (see SENIORITY_KEYWORDS) for every other source. Leave both
+    blank to pull everything configured with no filtering.
 
     Returns (jobs, source_errors). A single dead/misconfigured board (e.g. a
     Lever slug that 404s) is skipped and reported in source_errors instead of
@@ -234,11 +264,15 @@ def run_search(position: str = "") -> tuple[list[dict], list[dict]]:
         needle = position.lower()
         broad = [j for j in broad if needle in (j.get("title") or "").lower()]
 
+    if seniority:
+        broad = [j for j in broad if _matches_seniority(j.get("title"), seniority)]
+
+    serp_query = " ".join(part for part in (SENIORITY_LABELS.get(seniority, ""), position) if part).strip()
     serpapi_results = []
-    if position:
+    if serp_query:
         try:
-            serpapi_results = [{"source": "google_jobs", **j} for j in search_serpapi(position)]
+            serpapi_results = [{"source": "google_jobs", **j} for j in search_serpapi(serp_query)]
         except requests.RequestException as exc:
-            source_errors.append({"source": "google_jobs", "identifier": position, "error": str(exc)})
+            source_errors.append({"source": "google_jobs", "identifier": serp_query, "error": str(exc)})
 
     return broad + serpapi_results, source_errors

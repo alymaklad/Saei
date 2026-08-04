@@ -11,6 +11,7 @@ venv/
 data/*.db
 credentials/*.json
 cv_output/*.docx
+cv_output/*.pdf
 cv/current_cv.*
 !data/.gitkeep
 !credentials/.gitkeep
