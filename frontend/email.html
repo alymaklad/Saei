@@ -41,8 +41,12 @@
         <p class="note">
           Requires a Gmail OAuth client file at <code>credentials/gmail_credentials.json</code>
           (Google Cloud Console &rarr; OAuth client ID &rarr; Desktop app). Clicking
-          Connect opens a browser tab for Google's consent screen; the request
-          waits until you finish it.
+          Connect opens a new browser tab where you sign in to your Google
+          account and grant access — once you do, the tab tells you to close
+          it and this page updates to "Connected" automatically. Nothing is
+          typed here; Google issues the credentials directly to this app and
+          they're saved to <code>credentials/gmail_token.json</code>. Times
+          out after 3 minutes if the tab is left unfinished.
         </p>
       </div>
     </section>

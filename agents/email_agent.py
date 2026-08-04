@@ -34,11 +34,19 @@ def is_authenticated() -> bool:
     return bool(creds and (creds.valid or creds.refresh_token))
 
 
+GMAIL_AUTH_TIMEOUT_SECONDS = 180  # give up if the user never completes the browser flow
+
+
 def get_gmail_service():
     """
-    First run opens a browser for OAuth consent (needs GMAIL_CREDENTIALS_JSON,
+    First run opens a new browser tab for OAuth consent (needs GMAIL_CREDENTIALS_JSON,
     downloaded free from Google Cloud Console -> OAuth client, Desktop app type).
     Token is cached to GMAIL_TOKEN_JSON afterward — no repeated login.
+
+    This blocks the calling thread until the user finishes (or abandons) the
+    browser flow -- api.py's /api/email/authenticate runs it in FastAPI's
+    threadpool for exactly that reason. GMAIL_AUTH_TIMEOUT_SECONDS bounds how
+    long it'll wait so an abandoned tab can't hang the request forever.
     """
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -53,7 +61,16 @@ def get_gmail_service():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(config.GMAIL_CREDENTIALS_JSON, SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(
+                port=0,
+                open_browser=True,  # explicit rather than relying on the library default
+                timeout_seconds=GMAIL_AUTH_TIMEOUT_SECONDS,
+                authorization_prompt_message="",  # nothing to print to a console the user isn't watching
+                success_message=(
+                    "Signed in. You can close this tab and return to the "
+                    "Job Application Agent dashboard."
+                ),
+            )
         os.makedirs(os.path.dirname(config.GMAIL_TOKEN_JSON) or ".", exist_ok=True)
         with open(config.GMAIL_TOKEN_JSON, "w") as f:
             f.write(creds.to_json())

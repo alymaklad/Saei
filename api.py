@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import google_auth_oauthlib.flow
+
 import config
 import cv_parser
 import env_store
@@ -277,9 +279,16 @@ def email_authenticate():
             "type) first, then try again.",
         )
     try:
-        # Blocks this request until the browser tab it opens completes Google's
-        # consent screen (or the flow times out) -- expected for a local tool.
+        # Blocks this request until the new browser tab it opens completes
+        # Google's consent screen -- expected for a local tool. Bounded by
+        # GMAIL_AUTH_TIMEOUT_SECONDS so an abandoned tab can't hang forever.
         email_agent.get_gmail_service()
+    except google_auth_oauthlib.flow.WSGITimeoutError:
+        raise HTTPException(
+            408,
+            f"Timed out after {email_agent.GMAIL_AUTH_TIMEOUT_SECONDS}s waiting for you to "
+            "finish signing in. Click Connect Gmail again when you're ready.",
+        )
     except Exception as exc:  # noqa: BLE001 -- surface the real OAuth error to the UI
         raise HTTPException(400, f"Authentication failed: {exc}")
     return {"authenticated": True}
