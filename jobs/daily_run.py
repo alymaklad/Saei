@@ -13,7 +13,49 @@ def _job_exists(session, url: str) -> bool:
     return session.query(Job).filter(Job.url == url).first() is not None
 
 
-def run_daily_search_and_apply(cv_path: str | None = None, query: str = ""):
+def _process_one_job(session, raw_job: dict, cv_text: str) -> dict:
+    """
+    Everything for a single job, wrapped in a SAVEPOINT by the caller so that
+    one job's failure (a flaky LLM call, a malformed job dict, whatever)
+    can't roll back every other job already processed in this batch.
+    """
+    url = raw_job.get("url") or raw_job.get("hostedUrl") or raw_job.get("absolute_url")
+
+    job_row = Job(
+        url=url,
+        title=raw_job.get("title", ""),
+        company=raw_job.get("company") or raw_job.get("watchlist_company", ""),
+        source_site=raw_job.get("source", "unknown"),
+        description=raw_job.get("description") or raw_job.get("content", ""),
+    )
+    session.add(job_row)
+    session.flush()  # get job_row.id before the orchestrator call
+
+    raw_job["id"] = job_row.id
+    raw_job["url"] = url
+    raw_job.setdefault("description", job_row.description)
+
+    result = orchestrator_app.invoke({"job": raw_job, "cv_text": cv_text})
+
+    app_row = Application(
+        job_id=job_row.id,
+        ats_score=result.get("ats_result", {}).get("score") if result.get("ats_result") else None,
+        cv_version_path=result.get("cv_path"),
+        status=result.get("status", "unknown"),
+        date_applied=datetime.now(timezone.utc) if result.get("status") == "auto_submitted" else None,
+    )
+    session.add(app_row)
+
+    if result.get("ats_result", {}).get("missing_skills"):
+        session.add(SkillGap(
+            job_id=job_row.id,
+            missing_skills=json.dumps(result["ats_result"]["missing_skills"]),
+        ))
+
+    return {"title": job_row.title, "company": job_row.company, "status": app_row.status}
+
+
+def run_daily_search_and_apply(cv_path: str | None = None, query: str = "") -> dict:
     init_db()
     cv_path = cv_path or find_default_cv("cv")
     if not cv_path:
@@ -25,52 +67,31 @@ def run_daily_search_and_apply(cv_path: str | None = None, query: str = ""):
     found = run_search(query=query)
 
     processed = []
+    errors = []
     with get_session() as session:
         for raw_job in found:
             url = raw_job.get("url") or raw_job.get("hostedUrl") or raw_job.get("absolute_url")
             if not url or _job_exists(session, url):
                 continue  # idempotent: never process the same job twice
 
-            job_row = Job(
-                url=url,
-                title=raw_job.get("title", ""),
-                company=raw_job.get("company") or raw_job.get("watchlist_company", ""),
-                source_site=raw_job.get("source", "unknown"),
-                description=raw_job.get("description") or raw_job.get("content", ""),
-            )
-            session.add(job_row)
-            session.flush()  # get job_row.id before commit
+            try:
+                with session.begin_nested():  # per-job SAVEPOINT
+                    outcome = _process_one_job(session, raw_job, cv_text)
+                processed.append(outcome)
+            except Exception as exc:  # noqa: BLE001 -- one bad job shouldn't sink the batch
+                errors.append({
+                    "title": raw_job.get("title", ""),
+                    "url": url,
+                    "error": str(exc),
+                })
 
-            raw_job["id"] = job_row.id
-            raw_job["url"] = url
-            raw_job.setdefault("description", job_row.description)
-
-            result = orchestrator_app.invoke({"job": raw_job, "cv_text": cv_text})
-
-            app_row = Application(
-                job_id=job_row.id,
-                ats_score=result.get("ats_result", {}).get("score") if result.get("ats_result") else None,
-                cv_version_path=result.get("cv_path"),
-                status=result.get("status", "unknown"),
-                date_applied=datetime.now(timezone.utc) if result.get("status") == "auto_submitted" else None,
-            )
-            session.add(app_row)
-
-            if result.get("ats_result", {}).get("missing_skills"):
-                session.add(SkillGap(
-                    job_id=job_row.id,
-                    missing_skills=json.dumps(result["ats_result"]["missing_skills"]),
-                ))
-
-            processed.append({
-                "title": job_row.title,
-                "company": job_row.company,
-                "status": app_row.status,
-            })
-
-    return processed
+    return {"processed": processed, "errors": errors, "found": len(found)}
 
 
 if __name__ == "__main__":
-    for r in run_daily_search_and_apply():
+    outcome = run_daily_search_and_apply()
+    for r in outcome["processed"]:
         print(r)
+    for e in outcome["errors"]:
+        print("ERROR:", e)
+    print(f"{len(outcome['processed'])} processed, {len(outcome['errors'])} failed, {outcome['found']} found total")

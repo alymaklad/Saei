@@ -146,7 +146,12 @@ single user. `frontend/` is a static, dependency-free HTML/CSS/JS dashboard
 (off-white, minimalist) — no build step required. Six pages, linked from the
 nav bar on every page:
 
-- **Dashboard** (`index.html`) — stats, applications table, skill gaps, latest news digest.
+- **Dashboard** (`index.html`) — stats, applications table, skill gaps, latest
+  news digest, and a **Search for jobs** button that runs the same
+  search-and-apply pipeline the scheduler fires at 8am, on demand (optional
+  keyword field for the SerpAPI/Google Jobs source). Blocks while running --
+  can take a few minutes since it's one LLM call per new job found -- and
+  refreshes the rest of the dashboard when it's done.
 - **Settings** (`settings.html`) — choose the LLM provider (Ollama or Gemini)
   and enter/replace the Gemini API key. Saved to `.env` on the machine running
   `api.py` (`env_store.py` upserts the specific keys, preserving everything

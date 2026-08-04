@@ -24,6 +24,7 @@ import cv_parser
 import env_store
 from agents import email_agent
 from db import get_session, init_db
+from jobs.daily_run import run_daily_search_and_apply
 from models import Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog
 
 app = FastAPI(title="Job Application Agent API")
@@ -385,3 +386,26 @@ def list_reports(limit: int = 50):
         }
         for r in rows
     ]
+
+
+# ---- search: trigger a search-and-apply run from the dashboard --------------
+
+class SearchRunRequest(BaseModel):
+    query: Optional[str] = None
+
+
+@app.post("/api/search/run")
+def run_search_now(body: SearchRunRequest = SearchRunRequest()):
+    """
+    Runs the same search-and-apply pipeline the scheduler fires at 8am, on
+    demand. Blocks until it's done -- can take a while (one LLM call per new
+    job found) -- which is why the frontend shows a "this may take a few
+    minutes" message rather than a spinner that implies it'll be instant.
+    """
+    try:
+        return run_daily_search_and_apply(query=body.query or "")
+    except RuntimeError as exc:
+        # e.g. no CV uploaded yet -- a config problem, not a server error
+        raise HTTPException(400, str(exc))
+    except Exception as exc:  # noqa: BLE001 -- surface the real failure to the UI
+        raise HTTPException(500, f"Search run failed: {exc}")

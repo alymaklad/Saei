@@ -114,6 +114,39 @@ body {
 
 .wide-main { width: 100%; }
 
+/* ---- search card ---- */
+
+.search-card { margin-bottom: 16px; }
+
+.search-body {
+  display: flex;
+  gap: 10px;
+  padding: 0 18px 14px;
+}
+
+.search-body input[type="text"] {
+  flex: 1;
+  font-family: inherit;
+  font-size: 13.5px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.search-body input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search-message {
+  padding: 0 18px 16px;
+  margin: 0;
+}
+
+.search-message:empty { padding: 0; }
+
 /* ---- stats ---- */
 
 .stats-grid {
