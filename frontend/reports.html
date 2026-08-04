@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent — Reports</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink">Dashboard</a>
+    <a href="settings.html" class="navlink">Settings</a>
+    <a href="cv.html" class="navlink">CV</a>
+    <a href="email.html" class="navlink">Email</a>
+    <a href="reports.html" class="navlink active">Reports</a>
+    <a href="features.html" class="navlink">Features</a>
+  </nav>
+
+  <main class="narrow-main">
+    <section class="card">
+      <div class="card-header">
+        <h2>Report history</h2>
+        <span class="card-sub">Daily application summaries + weekly news digests sent over Telegram</span>
+      </div>
+      <div id="reports-list" class="reports-list">Loading&hellip;</div>
+    </section>
+  </main>
+
+</div>
+
+<script src="config.js"></script>
+<script src="reports.js"></script>
+</body>
+</html>

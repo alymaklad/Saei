@@ -48,3 +48,29 @@ class NewsDigest(Base):
     field = Column(String)
     content = Column(Text)
     date_created = Column(DateTime, default=_utcnow)
+
+
+class EmailLog(Base):
+    """One row per attempted send -- what the Email tab lists."""
+    __tablename__ = "email_logs"
+    id = Column(Integer, primary_key=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=True)
+    to_email = Column(String)
+    subject = Column(String)
+    gmail_message_id = Column(String, nullable=True)
+    dry_run = Column(Boolean, default=True)
+    status = Column(String)               # "sent" | "dry_run" | "failed"
+    error_message = Column(Text, nullable=True)
+    sent_at = Column(DateTime, default=_utcnow)
+
+
+class ReportLog(Base):
+    """One row per daily/weekly report send attempt -- what the Reports tab lists."""
+    __tablename__ = "report_logs"
+    id = Column(Integer, primary_key=True)
+    report_type = Column(String)          # "daily" | "weekly"
+    content = Column(Text)
+    dry_run = Column(Boolean, default=True)
+    status = Column(String)               # "sent" | "dry_run" | "failed"
+    error_message = Column(Text, nullable=True)
+    sent_at = Column(DateTime, default=_utcnow)

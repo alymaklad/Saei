@@ -21,6 +21,8 @@
     <a href="index.html" class="navlink">Dashboard</a>
     <a href="settings.html" class="navlink">Settings</a>
     <a href="cv.html" class="navlink active">CV</a>
+    <a href="email.html" class="navlink">Email</a>
+    <a href="reports.html" class="navlink">Reports</a>
     <a href="features.html" class="navlink">Features</a>
   </nav>
 
@@ -52,6 +54,29 @@
           gets tailored copies derived from this file when the ATS score is
           below the fit threshold; the original itself is never overwritten.
         </p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Tailored CVs</h2>
+        <span class="card-sub">Generated automatically for low-fit jobs</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Company</th>
+              <th>ATS score</th>
+              <th>Date</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="cv-rewrites-body">
+            <tr><td colspan="5" class="empty">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </main>

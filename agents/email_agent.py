@@ -13,6 +13,27 @@ import config
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
+def credentials_configured() -> bool:
+    """Whether a Gmail OAuth client file has been downloaded and placed at GMAIL_CREDENTIALS_JSON."""
+    return os.path.exists(config.GMAIL_CREDENTIALS_JSON)
+
+
+def is_authenticated() -> bool:
+    """
+    Checks whether we already have a usable cached token, without triggering
+    the interactive OAuth flow. Used by GET /api/email/status so the frontend
+    can show "Connected" without popping open a browser window just to check.
+    """
+    if not os.path.exists(config.GMAIL_TOKEN_JSON):
+        return False
+    from google.oauth2.credentials import Credentials
+    try:
+        creds = Credentials.from_authorized_user_file(config.GMAIL_TOKEN_JSON, SCOPES)
+    except (ValueError, OSError):
+        return False
+    return bool(creds and (creds.valid or creds.refresh_token))
+
+
 def get_gmail_service():
     """
     First run opens a browser for OAuth consent (needs GMAIL_CREDENTIALS_JSON,
@@ -56,9 +77,10 @@ def send_application_email(to_email: str, subject: str, body: str, cv_path: str)
     message["subject"] = subject
     message.attach(MIMEText(body))
 
+    attachment_name = os.path.basename(cv_path) or "CV"
     with open(cv_path, "rb") as f:
-        part = MIMEApplication(f.read(), Name="CV.docx")
-    part["Content-Disposition"] = 'attachment; filename="CV.docx"'
+        part = MIMEApplication(f.read(), Name=attachment_name)
+    part["Content-Disposition"] = f'attachment; filename="{attachment_name}"'
     message.attach(part)
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent — Email</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink">Dashboard</a>
+    <a href="settings.html" class="navlink">Settings</a>
+    <a href="cv.html" class="navlink">CV</a>
+    <a href="email.html" class="navlink active">Email</a>
+    <a href="reports.html" class="navlink">Reports</a>
+    <a href="features.html" class="navlink">Features</a>
+  </nav>
+
+  <main class="narrow-main">
+    <section class="card">
+      <div class="card-header">
+        <h2>Gmail connection</h2>
+        <span class="card-sub">Used to send application emails from your own account</span>
+      </div>
+      <div class="upload-body">
+        <p id="gmail-status" class="cv-current">Checking&hellip;</p>
+        <div class="form-actions">
+          <button type="button" id="connect-btn" class="btn btn-primary">Connect Gmail</button>
+          <span id="connect-message" class="save-message"></span>
+        </div>
+        <p class="note">
+          Requires a Gmail OAuth client file at <code>credentials/gmail_credentials.json</code>
+          (Google Cloud Console &rarr; OAuth client ID &rarr; Desktop app). Clicking
+          Connect opens a browser tab for Google's consent screen; the request
+          waits until you finish it.
+        </p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Send an application email</h2>
+        <span class="card-sub">For a drafted application awaiting your review</span>
+      </div>
+      <form id="send-form" class="form">
+        <div class="form-field">
+          <label for="application-select">Application</label>
+          <select id="application-select" name="application_id"></select>
+        </div>
+        <div class="form-field">
+          <label for="to-email">To</label>
+          <input type="text" id="to-email" name="to_email" placeholder="hiring@company.com" required>
+        </div>
+        <div class="form-field">
+          <label for="subject">Subject</label>
+          <input type="text" id="subject" name="subject" required>
+        </div>
+        <div class="form-field">
+          <label for="body">Body</label>
+          <textarea id="body" name="body" rows="6" required></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="send-btn">Send</button>
+          <span id="send-message" class="save-message"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Sent emails</h2>
+        <span class="card-sub" id="emails-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>To</th>
+              <th>Subject</th>
+              <th>Job</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="emails-body">
+            <tr><td colspan="5" class="empty">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+</div>
+
+<script src="config.js"></script>
+<script src="email.js"></script>
+</body>
+</html>

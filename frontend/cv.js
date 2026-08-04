@@ -102,4 +102,27 @@ uploadBtn.addEventListener("click", async () => {
   }
 });
 
+async function loadCvRewrites() {
+  const body = document.getElementById("cv-rewrites-body");
+  try {
+    const rewrites = await getJSON("/api/cv/rewrites?limit=50");
+    if (!rewrites.length) {
+      body.innerHTML = `<tr><td colspan="5" class="empty">None yet — generated when a job's ATS score is below the fit threshold.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rewrites.map((r) => `
+      <tr>
+        <td>${escapeHtml(r.job_title || "—")}</td>
+        <td>${escapeHtml(r.company || "—")}</td>
+        <td>${r.ats_score !== null ? Math.round(r.ats_score * 100) + "%" : "—"}</td>
+        <td>${r.date_created ? new Date(r.date_created).toLocaleDateString() : "—"}</td>
+        <td><a href="${API_BASE}${r.download_url}" target="_blank" rel="noopener">Download</a></td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="5" class="empty">Could not reach the backend API.</td></tr>`;
+  }
+}
+
 loadCvStatus();
+loadCvRewrites();

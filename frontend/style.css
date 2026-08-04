@@ -325,7 +325,8 @@ td.empty, li.empty {
 
 .form-field select,
 .form-field input[type="text"],
-.form-field input[type="password"] {
+.form-field input[type="password"],
+.form-field textarea {
   font-family: inherit;
   font-size: 13.5px;
   padding: 9px 11px;
@@ -333,10 +334,12 @@ td.empty, li.empty {
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
+  resize: vertical;
 }
 
 .form-field select:focus,
-.form-field input:focus {
+.form-field input:focus,
+.form-field textarea:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -442,6 +445,28 @@ a.field-hint { color: var(--accent); }
   color: var(--text-muted);
   font-size: 13.5px;
   cursor: pointer;
+}
+
+/* ---- reports page ---- */
+
+.reports-list {
+  padding: 4px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.report-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.report-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .dropzone-active {
