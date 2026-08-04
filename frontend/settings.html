@@ -40,6 +40,7 @@
           <select id="llm-provider" name="llm_provider">
             <option value="ollama">Ollama (local, free, no key)</option>
             <option value="gemini">Google Gemini (free tier, needs an API key)</option>
+            <option value="groq">Groq (free tier, fast hosted inference, needs an API key)</option>
           </select>
         </div>
 
@@ -55,6 +56,15 @@
           <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
           <span class="field-hint" id="gemini-key-status"></span>
           <a class="field-hint" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free Gemini API key &rarr;</a>
+        </div>
+
+        <div class="form-field" id="groq-fields">
+          <label for="groq-api-key">Groq API key</label>
+          <input type="password" id="groq-api-key" name="groq_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
+          <span class="field-hint" id="groq-key-status"></span>
+          <a class="field-hint" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a free Groq API key &rarr;</a>
+          <label for="groq-model" class="form-field-secondary-label">Groq model</label>
+          <input type="text" id="groq-model" name="groq_model" placeholder="llama-3.3-70b-versatile">
         </div>
 
         <div class="form-actions">

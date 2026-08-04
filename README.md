@@ -27,7 +27,7 @@ Built entirely on free tools — see [Tech stack](#tech-stack) below.
 | Component | Tool |
 |---|---|
 | Orchestration | LangGraph |
-| LLM | Ollama (local, free) or Gemini API free tier |
+| LLM | Ollama (local, free), Gemini API free tier, or Groq API free tier (fast hosted inference) |
 | Job search | Greenhouse + Lever public APIs (free), SerpAPI free tier (100/mo, optional) |
 | Watchlist | Google Sheets via `gspread` (free service account) |
 | CV parsing | `pdfplumber` / `python-docx` (reads your uploaded .pdf/.docx) |
@@ -68,9 +68,14 @@ cp .env.example .env          # fill in the values you plan to use
 Minimum to run in dry-run mode with zero external accounts: nothing else —
 Greenhouse/Lever need no key, and `DRY_RUN=true` is the default.
 
-To use free LLM scoring, either:
+To use free LLM scoring, pick one:
 - Install [Ollama](https://ollama.com), run `ollama pull llama3.1`, leave `LLM_PROVIDER=ollama`, or
-- Get a free [Gemini API key](https://aistudio.google.com/apikey) and set `LLM_PROVIDER=gemini` + `GEMINI_API_KEY`.
+- Get a free [Gemini API key](https://aistudio.google.com/apikey) and set `LLM_PROVIDER=gemini` + `GEMINI_API_KEY`, or
+- Get a free [Groq API key](https://console.groq.com/keys) and set `LLM_PROVIDER=groq` + `GROQ_API_KEY`
+  (`GROQ_MODEL` defaults to `llama-3.3-70b-versatile`) — hosted, no local install, and generally
+  the fastest of the three since Groq runs on its own inference hardware.
+
+All three are switchable from the dashboard's **Settings** page too, not just `.env`.
 
 Add your CV before running the daily job — either upload it through the
 dashboard's **CV** page (`frontend/cv.html`), or place a file by hand at

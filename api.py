@@ -140,6 +140,8 @@ def news(limit: int = 5):
 class SettingsUpdate(BaseModel):
     llm_provider: str
     gemini_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    groq_model: Optional[str] = None
     ollama_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
 
@@ -150,15 +152,17 @@ def get_settings():
         "llm_provider": config.LLM_PROVIDER,
         "ollama_model": config.OLLAMA_MODEL,
         "ollama_base_url": config.OLLAMA_BASE_URL,
+        "groq_model": config.GROQ_MODEL,
         # Never echo the real key back to the frontend -- just whether one is set.
         "gemini_api_key_set": bool(config.GEMINI_API_KEY),
+        "groq_api_key_set": bool(config.GROQ_API_KEY),
     }
 
 
 @app.post("/api/settings")
 def update_settings(body: SettingsUpdate):
-    if body.llm_provider not in ("ollama", "gemini"):
-        raise HTTPException(400, "llm_provider must be 'ollama' or 'gemini'")
+    if body.llm_provider not in ("ollama", "gemini", "groq"):
+        raise HTTPException(400, "llm_provider must be 'ollama', 'gemini', or 'groq'")
 
     updates = {"LLM_PROVIDER": body.llm_provider}
     if body.ollama_model:
@@ -167,9 +171,15 @@ def update_settings(body: SettingsUpdate):
         updates["OLLAMA_BASE_URL"] = body.ollama_base_url
     if body.gemini_api_key:
         updates["GEMINI_API_KEY"] = body.gemini_api_key
+    if body.groq_api_key:
+        updates["GROQ_API_KEY"] = body.groq_api_key
+    if body.groq_model:
+        updates["GROQ_MODEL"] = body.groq_model
 
     if body.llm_provider == "gemini" and not body.gemini_api_key and not config.GEMINI_API_KEY:
         raise HTTPException(400, "GEMINI_API_KEY is required the first time you switch to gemini")
+    if body.llm_provider == "groq" and not body.groq_api_key and not config.GROQ_API_KEY:
+        raise HTTPException(400, "GROQ_API_KEY is required the first time you switch to groq")
 
     env_store.update_env_file(updates)
 
