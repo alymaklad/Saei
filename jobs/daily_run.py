@@ -72,7 +72,7 @@ def run_daily_search_and_apply(cv_path: str | None = None, position: str | None 
         )
     cv_text = parse_cv(cv_path)
     position = position if position is not None else config.SEARCH_POSITION_QUERY
-    found = run_search(position=position)
+    found, source_errors = run_search(position=position)
 
     processed = []
     errors = []
@@ -93,7 +93,7 @@ def run_daily_search_and_apply(cv_path: str | None = None, position: str | None 
                     "error": str(exc),
                 })
 
-    return {"processed": processed, "errors": errors, "found": len(found)}
+    return {"processed": processed, "errors": errors, "found": len(found), "source_errors": source_errors}
 
 
 if __name__ == "__main__":
@@ -102,4 +102,7 @@ if __name__ == "__main__":
         print(r)
     for e in outcome["errors"]:
         print("ERROR:", e)
-    print(f"{len(outcome['processed'])} processed, {len(outcome['errors'])} failed, {outcome['found']} found total")
+    for e in outcome["source_errors"]:
+        print("SOURCE UNREACHABLE:", e)
+    print(f"{len(outcome['processed'])} processed, {len(outcome['errors'])} failed, "
+          f"{len(outcome['source_errors'])} source(s) unreachable, {outcome['found']} found total")

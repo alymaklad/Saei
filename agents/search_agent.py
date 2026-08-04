@@ -156,19 +156,22 @@ def read_watchlist_sheet() -> list[dict]:
 def search_from_watchlist() -> list[dict]:
     results = []
     for row in read_watchlist_sheet():
-        board = row.get("greenhouse_board_token")
-        slug = row.get("lever_company_slug")
-        if board:
-            results += [{"source": "greenhouse", "watchlist_company": row.get("company"), **j}
-                        for j in search_greenhouse(board)]
-        elif slug:
-            results += [{"source": "lever", "watchlist_company": row.get("company"), **j}
-                        for j in search_lever(slug)]
-        else:
-            query = f"{row.get('role_keyword', '')} {row.get('company', '')}".strip()
-            if query:
-                results += [{"source": "google_jobs", "watchlist_company": row.get("company"), **j}
-                            for j in search_serpapi(query)]
+        try:
+            board = row.get("greenhouse_board_token")
+            slug = row.get("lever_company_slug")
+            if board:
+                results += [{"source": "greenhouse", "watchlist_company": row.get("company"), **j}
+                            for j in search_greenhouse(board)]
+            elif slug:
+                results += [{"source": "lever", "watchlist_company": row.get("company"), **j}
+                            for j in search_lever(slug)]
+            else:
+                query = f"{row.get('role_keyword', '')} {row.get('company', '')}".strip()
+                if query:
+                    results += [{"source": "google_jobs", "watchlist_company": row.get("company"), **j}
+                                for j in search_serpapi(query)]
+        except requests.RequestException:
+            continue  # one bad watchlist row shouldn't sink the rest
     return results
 
 
@@ -181,7 +184,7 @@ def get_configured_sites() -> list[dict]:
         return [{"url": r.url, "site_type": r.site_type, "identifier": r.identifier} for r in rows]
 
 
-def run_search(position: str = "") -> list[dict]:
+def run_search(position: str = "") -> tuple[list[dict], list[dict]]:
     """
     Pulls from every configured free source and tags each job with its
     source. `position` (a job title/keyword) is used two ways: as the literal
@@ -189,31 +192,53 @@ def run_search(position: str = "") -> list[dict]:
     other source (Greenhouse/Lever/watchlist/dashboard-added sites) so one
     field controls relevance everywhere. Leave blank to pull everything
     configured with no title filter.
+
+    Returns (jobs, source_errors). A single dead/misconfigured board (e.g. a
+    Lever slug that 404s) is skipped and reported in source_errors instead of
+    aborting the whole run -- one bad source shouldn't block every other one.
     """
     broad = []  # everything except SerpAPI -- position-filtered by title below
+    source_errors = []
 
     for board in config.GREENHOUSE_BOARD_TOKENS:
-        broad += [{"source": "greenhouse", "board": board, **j} for j in search_greenhouse(board)]
+        try:
+            broad += [{"source": "greenhouse", "board": board, **j} for j in search_greenhouse(board)]
+        except requests.RequestException as exc:
+            source_errors.append({"source": "greenhouse", "identifier": board, "error": str(exc)})
 
     for company in config.LEVER_COMPANY_SLUGS:
-        broad += [{"source": "lever", "company_slug": company, **j} for j in search_lever(company)]
+        try:
+            broad += [{"source": "lever", "company_slug": company, **j} for j in search_lever(company)]
+        except requests.RequestException as exc:
+            source_errors.append({"source": "lever", "identifier": company, "error": str(exc)})
 
-    broad += search_from_watchlist()
+    try:
+        broad += search_from_watchlist()
+    except Exception as exc:  # noqa: BLE001 -- e.g. bad service account creds
+        source_errors.append({"source": "watchlist", "identifier": None, "error": str(exc)})
 
     for site in get_configured_sites():
-        if site["site_type"] == "greenhouse":
-            broad += [{"source": "greenhouse", "board": site["identifier"], "site_url": site["url"], **j}
-                      for j in search_greenhouse(site["identifier"])]
-        elif site["site_type"] == "lever":
-            broad += [{"source": "lever", "company_slug": site["identifier"], "site_url": site["url"], **j}
-                      for j in search_lever(site["identifier"])]
-        else:
-            broad += search_generic_site(site["url"], position=position)
+        try:
+            if site["site_type"] == "greenhouse":
+                broad += [{"source": "greenhouse", "board": site["identifier"], "site_url": site["url"], **j}
+                          for j in search_greenhouse(site["identifier"])]
+            elif site["site_type"] == "lever":
+                broad += [{"source": "lever", "company_slug": site["identifier"], "site_url": site["url"], **j}
+                          for j in search_lever(site["identifier"])]
+            else:
+                broad += search_generic_site(site["url"], position=position)
+        except requests.RequestException as exc:
+            source_errors.append({"source": site["site_type"], "identifier": site["url"], "error": str(exc)})
 
     if position:
         needle = position.lower()
         broad = [j for j in broad if needle in (j.get("title") or "").lower()]
 
-    serpapi_results = [{"source": "google_jobs", **j} for j in search_serpapi(position)] if position else []
+    serpapi_results = []
+    if position:
+        try:
+            serpapi_results = [{"source": "google_jobs", **j} for j in search_serpapi(position)]
+        except requests.RequestException as exc:
+            source_errors.append({"source": "google_jobs", "identifier": position, "error": str(exc)})
 
-    return broad + serpapi_results
+    return broad + serpapi_results, source_errors

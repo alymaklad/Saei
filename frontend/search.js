@@ -110,10 +110,16 @@ searchBtn.addEventListener("click", async () => {
 
   try {
     const result = await postJSON("/api/search/run", {});
+    const sourceErrors = result.source_errors || [];
     const parts = [`${result.found} job(s) found`, `${result.processed.length} new`];
     if (result.errors.length) parts.push(`${result.errors.length} failed`);
-    searchMessage.textContent = parts.join(", ") + ".";
-    searchMessage.className = result.errors.length
+    if (sourceErrors.length) parts.push(`${sourceErrors.length} source(s) unreachable`);
+    let text = parts.join(", ") + ".";
+    if (sourceErrors.length) {
+      text += " " + sourceErrors.map((e) => `${e.source}:${e.identifier || "?"} — ${e.error}`).join("; ");
+    }
+    searchMessage.textContent = text;
+    searchMessage.className = (result.errors.length || sourceErrors.length)
       ? "save-message search-message save-error"
       : "save-message search-message save-success";
   } catch (e) {
