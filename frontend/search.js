@@ -141,15 +141,27 @@ searchBtn.addEventListener("click", async () => {
       text += " " + sourceErrors.map((e) => `${e.source}:${e.identifier || "?"} — ${e.error}`).join("; ");
     }
     if (jobErrors.length) {
-      // The same failure (e.g. a bad LLM config) usually repeats across
-      // every job, so group by message instead of listing all of them.
-      const counts = new Map();
+      // The same failure (e.g. a rate limit) usually repeats across every
+      // job, but messages like "Used 197574 ... try again in 17m13s" carry
+      // per-request numbers that make each one a unique string -- group by
+      // the message with digits blanked out so those still collapse together.
+      const groups = new Map();
       jobErrors.forEach((e) => {
         const msg = e.error || "Unknown error";
-        counts.set(msg, (counts.get(msg) || 0) + 1);
+        const key = msg.replace(/\d+(\.\d+)?/g, "#");
+        if (!groups.has(key)) groups.set(key, { count: 0, sample: msg });
+        groups.get(key).count += 1;
       });
-      const summary = [...counts.entries()]
-        .map(([msg, count]) => (count > 1 ? `${msg} (x${count})` : msg))
+      const summary = [...groups.values()]
+        .map(({ sample, count }) => {
+          // Rate-limit/quota messages are long and mostly marketing copy --
+          // show just the useful lead-in instead of the full raw text.
+          const isRateLimit = /rate.?limit|quota|429/i.test(sample);
+          const shown = isRateLimit
+            ? (sample.match(/Rate limit reached[^.]*\./i)?.[0] || sample.slice(0, 200))
+            : sample;
+          return count > 1 ? `${shown} (x${count})` : shown;
+        })
         .join("; ");
       text += ` Job failures: ${summary}`;
     }
