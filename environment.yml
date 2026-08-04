@@ -1,0 +1,17 @@
+# Conda environment for the Job Application Agent.
+#
+# Create:   conda env create -f environment.yml
+# Update:   conda env update -f environment.yml --prune
+# Activate: conda activate job-agent
+#
+# Run these from the project root -- the pip section below installs from
+# requirements.txt by relative path, so package versions stay defined in one
+# place instead of duplicated between this file and requirements.txt.
+name: job-agent
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - -r requirements.txt

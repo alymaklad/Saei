@@ -38,11 +38,29 @@ Built entirely on free tools — see [Tech stack](#tech-stack) below.
 
 ## Setup
 
+Pick one environment manager -- both install the exact same packages from
+`requirements.txt`, so it's a matter of preference.
+
+**venv:**
+
 ```bash
 python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
-playwright install chromium   # only needed if you enable JS-rendered scraping
+```
 
+**conda:**
+
+```bash
+conda env create -f environment.yml
+conda activate job-agent
+```
+
+(`conda env update -f environment.yml --prune` to sync after `requirements.txt` changes.)
+
+Either way:
+
+```bash
+playwright install chromium   # only needed if you enable JS-rendered scraping
 cp .env.example .env          # fill in the values you plan to use
 ```
 
@@ -57,15 +75,25 @@ Put your CV at `cv/current_cv.pdf` (or `.docx`) before running the daily job.
 
 ## Running it
 
-**Windows, one click:** double-click `run.bat`. First run copies `.env.example`
-to `.env` and opens it in Notepad so you can fill in real values — save, close,
-and double-click `run.bat` again. After that it starts the API, the scheduler,
+**Windows, one click:** double-click `run.bat` (venv) or `run_conda.bat`
+(conda — creates/updates the `job-agent` environment automatically, no
+manual `conda env create` needed). First run copies `.env.example` to `.env`
+and opens it in Notepad so you can fill in real values — save, close, and
+double-click the script again. After that it starts the API, the scheduler,
 and opens the dashboard in your browser every time.
+
+`run_conda.bat` needs `conda activate` to work in a plain Command Prompt,
+which requires `conda init cmd.exe` to have been run once (the Anaconda/Miniconda
+installer usually offers this). If the API/Scheduler windows show a "conda is
+not recognized" or "CondaError: Run 'conda init'" error, either run that once
+from an Anaconda Prompt and restart your terminal, or just launch the script
+from an Anaconda Prompt directly.
 
 To get a proper Desktop icon instead of digging into the project folder each
 time, double-click `create_desktop_shortcut.vbs` once — it creates a
 "Job Application Agent" shortcut on your Desktop that runs `run.bat`. One-time
-setup; the shortcut itself is reusable forever.
+setup; the shortcut itself is reusable forever. (Edit the `.vbs` file's
+`targetBat` line to point at `run_conda.bat` instead if that's the one you use.)
 
 **Manually / other OS:**
 
@@ -165,7 +193,10 @@ orchestrator.py        # LangGraph state machine wiring the agents together
 jobs/                  # entry points: daily_run, daily_report, weekly_news, apply_from_link
 scheduler.py            # APScheduler cron triggers -> automatic daily/weekly execution
 api.py                  # read-only FastAPI layer over the SQLite DB, for the frontend
-run.bat                 # Windows one-click launcher: API + scheduler + dashboard
+requirements.txt        # pip package list -- single source of truth for versions
+environment.yml         # conda env definition, installs from requirements.txt
+run.bat                 # Windows one-click launcher (venv): API + scheduler + dashboard
+run_conda.bat           # same, but creates/activates the conda env instead
 create_desktop_shortcut.vbs  # one-time: creates a Desktop shortcut to run.bat
 frontend/               # static off-white dashboard (index.html/style.css/app.js), no build step
 tests/                  # pytest suite
