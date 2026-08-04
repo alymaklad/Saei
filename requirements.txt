@@ -1,0 +1,17 @@
+langgraph
+langchain
+langchain-community
+langchain-google-genai
+sqlalchemy
+python-dotenv
+pdfplumber
+python-docx
+requests
+beautifulsoup4
+playwright
+google-api-python-client
+google-auth-oauthlib
+google-auth
+gspread
+apscheduler
+pytest

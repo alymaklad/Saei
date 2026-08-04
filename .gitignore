@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# runtime data — never commit real DB, credentials, or generated CVs
+data/*.db
+credentials/*.json
+cv_output/*.docx
+!data/.gitkeep
+!credentials/.gitkeep
+!cv_output/.gitkeep
