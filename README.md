@@ -170,6 +170,18 @@ nav bar on every page:
     e.g. "senior"/"sr." for Senior, "intern" for Intern; Mid Level matches
     titles with none of those keywords, since unlabeled titles are usually
     mid-level in practice). It's a heuristic, not an exact classification.
+  - **Max time since posted** — a dropdown (Any time / 24 hours / 3 days /
+    week / 2 weeks / month), saved to `.env` (`SEARCH_MAX_AGE_DAYS`). Only
+    applied where a real posted date exists: Greenhouse's `first_published`,
+    Lever's `createdAt`, or SerpAPI's relative `detected_extensions.posted_at`
+    text ("3 days ago", etc). Added sites searched by the generic scraper
+    have no structured date, so they're never excluded by this filter.
+  - **Max results per site** — a dropdown (No limit / 10 / 25 / 50 / 100),
+    saved to `.env` (`SEARCH_MAX_RESULTS_PER_SITE`). Caps the raw results
+    kept from each individual Greenhouse board, Lever company, watchlist
+    row, or added site *before* any filtering -- useful for a large board
+    (some return 500+ jobs) or to keep the generic scraper's per-page
+    fetching polite. Defaults to no limit, matching the original behavior.
   - **Job boards** — add any website URL. Greenhouse/Lever URLs are detected
     automatically and searched via their public APIs, same as the
     `.env`-configured boards; any other URL falls back to a best-effort

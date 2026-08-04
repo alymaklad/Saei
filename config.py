@@ -17,6 +17,16 @@ def _list(name: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _int_or_none(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 # LLM
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
@@ -38,6 +48,20 @@ SEARCH_POSITION_QUERY = os.getenv("SEARCH_POSITION_QUERY", "")
 # Seniority filter: one of "" (any), "intern", "entry", "mid", "senior",
 # "lead", "manager". Same sync behavior as SEARCH_POSITION_QUERY above.
 SEARCH_SENIORITY_LEVEL = os.getenv("SEARCH_SENIORITY_LEVEL", "")
+
+# Max raw results kept from each individual source (each Greenhouse board,
+# Lever company, watchlist row, or added website) before filtering. Blank/0 =
+# no limit -- preserves the original "pull everything" behavior. Generic
+# scraped sites are already capped internally (see GENERIC_SITE_MAX_CANDIDATES
+# in agents/search_agent.py) even when this is unset, since each candidate
+# there costs a real HTTP fetch.
+SEARCH_MAX_RESULTS_PER_SITE = _int_or_none("SEARCH_MAX_RESULTS_PER_SITE")
+
+# Max age in days for a job posting to be included. Blank/0 = no limit. Only
+# applied where a posted date can actually be determined (Greenhouse, Lever,
+# SerpAPI/Google Jobs) -- sources with no reliable date (generic scraped
+# sites) are never excluded by this filter since their age can't be verified.
+SEARCH_MAX_AGE_DAYS = _int_or_none("SEARCH_MAX_AGE_DAYS")
 
 # Google Sheets watchlist
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")

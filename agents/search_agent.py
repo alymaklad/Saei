@@ -11,6 +11,7 @@ Free sources, in priority order:
   5. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
 """
 import re
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -57,6 +58,89 @@ def _matches_seniority(title: str, level: str) -> bool:
     return any(kw in haystack for kw in SENIORITY_KEYWORDS.get(level, []))
 
 
+def _cap(jobs: list[dict], limit: int | None) -> list[dict]:
+    """Keeps only the first `limit` raw results from one source. None/0/negative
+    means no cap -- the original "pull everything" behavior."""
+    if limit and limit > 0:
+        return jobs[:limit]
+    return jobs
+
+
+# Posted-date extraction: each source exposes "when was this posted"
+# differently, so max-age filtering only works where we can actually find a
+# date. Jobs with no recognizable date are always kept (never excluded) since
+# their age genuinely can't be verified -- this is most relevant for the
+# generic scraper, which has no structured date at all.
+RELATIVE_DATE_RE = re.compile(r"(\d+)\+?\s*(hour|day|week|month)s?\s+ago", re.I)
+
+
+def _parse_relative_date(text: str) -> datetime | None:
+    """Parses SerpAPI/Google Jobs' detected_extensions.posted_at strings,
+    e.g. "3 days ago", "Today", "30+ days ago"."""
+    if not text:
+        return None
+    t = text.strip().lower()
+    if t in ("today", "just posted", "just now"):
+        return datetime.now(timezone.utc)
+    match = RELATIVE_DATE_RE.search(t)
+    if not match:
+        return None
+    n, unit = int(match.group(1)), match.group(2)
+    delta = {
+        "hour": timedelta(hours=n),
+        "day": timedelta(days=n),
+        "week": timedelta(weeks=n),
+        "month": timedelta(days=n * 30),
+    }[unit]
+    return datetime.now(timezone.utc) - delta
+
+
+def _extract_posted_at(job: dict) -> datetime | None:
+    # Greenhouse: ISO 8601 with offset. first_published is the original post
+    # date; updated_at changes whenever the listing is edited, so it's only
+    # used as a fallback.
+    for key in ("first_published", "updated_at"):
+        value = job.get(key)
+        if value:
+            try:
+                return datetime.fromisoformat(value)
+            except (ValueError, TypeError):
+                pass
+
+    # Lever: createdAt is epoch milliseconds.
+    created_at = job.get("createdAt")
+    if created_at:
+        try:
+            return datetime.fromtimestamp(int(created_at) / 1000, tz=timezone.utc)
+        except (ValueError, TypeError, OSError, OverflowError):
+            pass
+
+    # SerpAPI / Google Jobs: relative text, e.g. "3 days ago".
+    posted_at = (job.get("detected_extensions") or {}).get("posted_at")
+    if posted_at:
+        parsed = _parse_relative_date(posted_at)
+        if parsed:
+            return parsed
+
+    return None
+
+
+def _job_age_days(job: dict) -> float | None:
+    posted_at = _extract_posted_at(job)
+    if not posted_at:
+        return None
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - posted_at).total_seconds() / 86400
+
+
+def _within_max_age(job: dict, max_age_days: int | None) -> bool:
+    if not max_age_days or max_age_days <= 0:
+        return True
+    age = _job_age_days(job)
+    return age is None or age <= max_age_days  # unknown age -- don't exclude it
+
+
 def parse_site_url(url: str) -> tuple[str, str | None]:
     """
     Detects a pasted Greenhouse/Lever board URL and extracts its board
@@ -92,12 +176,14 @@ def _looks_like_job_link(href: str, text: str) -> bool:
     return any(keyword in haystack for keyword in JOB_LINK_KEYWORDS)
 
 
-def search_generic_site(url: str, position: str = "") -> list[dict]:
+def search_generic_site(url: str, position: str = "", max_candidates: int | None = None) -> list[dict]:
     """
     Best-effort scraper for career-page URLs that aren't Greenhouse/Lever.
     Finds same-domain links that look job-related (by URL/text keywords),
     optionally narrowed to ones matching `position`, capped to a handful of
-    candidates to stay fast and polite, then fetches each candidate's page
+    candidates to stay fast and polite (`max_candidates`, falling back to
+    GENERIC_SITE_MAX_CANDIDATES if unset -- always capped, since each
+    candidate costs a real HTTP fetch), then fetches each candidate's page
     text as its description. Noisier than the Greenhouse/Lever path -- treat
     results as leads to review, not a guaranteed feed. Respect each site's
     Terms of Service before relying on this for a site that prohibits scraping.
@@ -130,8 +216,9 @@ def search_generic_site(url: str, position: str = "") -> list[dict]:
         if narrowed:  # only narrow if it doesn't wipe out every candidate
             candidates = narrowed
 
+    limit = max_candidates if max_candidates and max_candidates > 0 else GENERIC_SITE_MAX_CANDIDATES
     jobs = []
-    for job_url, link_text in candidates[:GENERIC_SITE_MAX_CANDIDATES]:
+    for job_url, link_text in candidates[:limit]:
         try:
             r = requests.get(job_url, timeout=GENERIC_SITE_TIMEOUT, headers=GENERIC_SITE_HEADERS)
             r.raise_for_status()
@@ -180,23 +267,23 @@ def read_watchlist_sheet() -> list[dict]:
     return sheet.get_all_records()
 
 
-def search_from_watchlist() -> list[dict]:
+def search_from_watchlist(max_results_per_site: int | None = None) -> list[dict]:
     results = []
     for row in read_watchlist_sheet():
         try:
             board = row.get("greenhouse_board_token")
             slug = row.get("lever_company_slug")
             if board:
-                results += [{"source": "greenhouse", "watchlist_company": row.get("company"), **j}
-                            for j in search_greenhouse(board)]
+                jobs = _cap(search_greenhouse(board), max_results_per_site)
+                results += [{"source": "greenhouse", "watchlist_company": row.get("company"), **j} for j in jobs]
             elif slug:
-                results += [{"source": "lever", "watchlist_company": row.get("company"), **j}
-                            for j in search_lever(slug)]
+                jobs = _cap(search_lever(slug), max_results_per_site)
+                results += [{"source": "lever", "watchlist_company": row.get("company"), **j} for j in jobs]
             else:
                 query = f"{row.get('role_keyword', '')} {row.get('company', '')}".strip()
                 if query:
-                    results += [{"source": "google_jobs", "watchlist_company": row.get("company"), **j}
-                                for j in search_serpapi(query)]
+                    jobs = _cap(search_serpapi(query), max_results_per_site)
+                    results += [{"source": "google_jobs", "watchlist_company": row.get("company"), **j} for j in jobs]
         except requests.RequestException:
             continue  # one bad watchlist row shouldn't sink the rest
     return results
@@ -211,7 +298,12 @@ def get_configured_sites() -> list[dict]:
         return [{"url": r.url, "site_type": r.site_type, "identifier": r.identifier} for r in rows]
 
 
-def run_search(position: str = "", seniority: str = "") -> tuple[list[dict], list[dict]]:
+def run_search(
+    position: str = "",
+    seniority: str = "",
+    max_results_per_site: int | None = None,
+    max_age_days: int | None = None,
+) -> tuple[list[dict], list[dict]]:
     """
     Pulls from every configured free source and tags each job with its
     source. `position` (a job title/keyword) is used two ways: as part of the
@@ -223,6 +315,12 @@ def run_search(position: str = "", seniority: str = "") -> tuple[list[dict], lis
     heuristics (see SENIORITY_KEYWORDS) for every other source. Leave both
     blank to pull everything configured with no filtering.
 
+    `max_results_per_site` caps the raw results kept from each individual
+    source (each Greenhouse board, Lever company, watchlist row, added site)
+    before any filtering -- None/0 means no cap. `max_age_days` drops jobs
+    older than that (Greenhouse/Lever/SerpAPI expose a real posted date;
+    generic scraped sites don't, so they're never excluded by this filter).
+
     Returns (jobs, source_errors). A single dead/misconfigured board (e.g. a
     Lever slug that 404s) is skipped and reported in source_errors instead of
     aborting the whole run -- one bad source shouldn't block every other one.
@@ -232,31 +330,35 @@ def run_search(position: str = "", seniority: str = "") -> tuple[list[dict], lis
 
     for board in config.GREENHOUSE_BOARD_TOKENS:
         try:
-            broad += [{"source": "greenhouse", "board": board, **j} for j in search_greenhouse(board)]
+            jobs = _cap(search_greenhouse(board), max_results_per_site)
+            broad += [{"source": "greenhouse", "board": board, **j} for j in jobs]
         except requests.RequestException as exc:
             source_errors.append({"source": "greenhouse", "identifier": board, "error": str(exc)})
 
     for company in config.LEVER_COMPANY_SLUGS:
         try:
-            broad += [{"source": "lever", "company_slug": company, **j} for j in search_lever(company)]
+            jobs = _cap(search_lever(company), max_results_per_site)
+            broad += [{"source": "lever", "company_slug": company, **j} for j in jobs]
         except requests.RequestException as exc:
             source_errors.append({"source": "lever", "identifier": company, "error": str(exc)})
 
     try:
-        broad += search_from_watchlist()
+        broad += search_from_watchlist(max_results_per_site=max_results_per_site)
     except Exception as exc:  # noqa: BLE001 -- e.g. bad service account creds
         source_errors.append({"source": "watchlist", "identifier": None, "error": str(exc)})
 
     for site in get_configured_sites():
         try:
             if site["site_type"] == "greenhouse":
+                jobs = _cap(search_greenhouse(site["identifier"]), max_results_per_site)
                 broad += [{"source": "greenhouse", "board": site["identifier"], "site_url": site["url"], **j}
-                          for j in search_greenhouse(site["identifier"])]
+                          for j in jobs]
             elif site["site_type"] == "lever":
+                jobs = _cap(search_lever(site["identifier"]), max_results_per_site)
                 broad += [{"source": "lever", "company_slug": site["identifier"], "site_url": site["url"], **j}
-                          for j in search_lever(site["identifier"])]
+                          for j in jobs]
             else:
-                broad += search_generic_site(site["url"], position=position)
+                broad += search_generic_site(site["url"], position=position, max_candidates=max_results_per_site)
         except requests.RequestException as exc:
             source_errors.append({"source": site["site_type"], "identifier": site["url"], "error": str(exc)})
 
@@ -271,8 +373,13 @@ def run_search(position: str = "", seniority: str = "") -> tuple[list[dict], lis
     serpapi_results = []
     if serp_query:
         try:
-            serpapi_results = [{"source": "google_jobs", **j} for j in search_serpapi(serp_query)]
+            jobs = _cap(search_serpapi(serp_query), max_results_per_site)
+            serpapi_results = [{"source": "google_jobs", **j} for j in jobs]
         except requests.RequestException as exc:
             source_errors.append({"source": "google_jobs", "identifier": serp_query, "error": str(exc)})
+
+    if max_age_days:
+        broad = [j for j in broad if _within_max_age(j, max_age_days)]
+        serpapi_results = [j for j in serpapi_results if _within_max_age(j, max_age_days)]
 
     return broad + serpapi_results, source_errors

@@ -11,6 +11,8 @@ function fmtDate(iso) {
 
 const positionInput = document.getElementById("position-input");
 const seniorityInput = document.getElementById("seniority-input");
+const maxAgeInput = document.getElementById("max-age-input");
+const maxResultsInput = document.getElementById("max-results-input");
 const positionMessage = document.getElementById("position-message");
 
 async function loadPosition() {
@@ -28,6 +30,8 @@ async function loadPosition() {
       seniorityInput.appendChild(opt);
     });
     seniorityInput.value = cfg.seniority_level || "";
+    maxAgeInput.value = cfg.max_age_days ? String(cfg.max_age_days) : "";
+    maxResultsInput.value = cfg.max_results_per_site ? String(cfg.max_results_per_site) : "";
   } catch (e) {
     positionMessage.textContent = "Could not reach the backend API.";
     positionMessage.className = "save-message save-error";
@@ -42,6 +46,8 @@ document.getElementById("position-form").addEventListener("submit", async (e) =>
     await postJSON("/api/search/config", {
       position_query: positionInput.value.trim(),
       seniority_level: seniorityInput.value,
+      max_age_days: maxAgeInput.value ? parseInt(maxAgeInput.value, 10) : null,
+      max_results_per_site: maxResultsInput.value ? parseInt(maxResultsInput.value, 10) : null,
     });
     positionMessage.textContent = "Saved.";
     positionMessage.className = "save-message save-success";

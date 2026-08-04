@@ -60,13 +60,15 @@ def run_daily_search_and_apply(
     cv_path: str | None = None,
     position: str | None = None,
     seniority: str | None = None,
+    max_results_per_site: int | None = None,
+    max_age_days: int | None = None,
 ) -> dict:
     """
-    `position`/`seniority` default to config.SEARCH_POSITION_QUERY/
-    SEARCH_SENIORITY_LEVEL (the values saved from the Search tab) when not
-    explicitly passed, so the 8am scheduler run and any CLI invocation
-    automatically stay in sync with whatever's saved -- only pass them
-    explicitly to override for a single run.
+    `position`/`seniority`/`max_results_per_site`/`max_age_days` default to
+    the matching config.SEARCH_* value (whatever's saved from the Search tab)
+    when not explicitly passed, so the 8am scheduler run and any CLI
+    invocation automatically stay in sync with whatever's saved -- only pass
+    them explicitly to override for a single run.
     """
     init_db()
     cv_path = cv_path or find_default_cv("cv")
@@ -78,7 +80,14 @@ def run_daily_search_and_apply(
     cv_text = parse_cv(cv_path)
     position = position if position is not None else config.SEARCH_POSITION_QUERY
     seniority = seniority if seniority is not None else config.SEARCH_SENIORITY_LEVEL
-    found, source_errors = run_search(position=position, seniority=seniority)
+    max_results_per_site = max_results_per_site if max_results_per_site is not None else config.SEARCH_MAX_RESULTS_PER_SITE
+    max_age_days = max_age_days if max_age_days is not None else config.SEARCH_MAX_AGE_DAYS
+    found, source_errors = run_search(
+        position=position,
+        seniority=seniority,
+        max_results_per_site=max_results_per_site,
+        max_age_days=max_age_days,
+    )
 
     processed = []
     errors = []

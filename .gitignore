@@ -9,6 +9,9 @@ venv/
 # runtime data — never commit real DB, credentials, generated CVs, or the
 # user's actual uploaded CV (personal data: name, contact info, history)
 data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 credentials/*.json
 cv_output/*.docx
 cv_output/*.pdf

@@ -30,8 +30,8 @@
   <main class="narrow-main">
     <section class="card">
       <div class="card-header">
-        <h2>Position</h2>
-        <span class="card-sub">Job title/keyword to search for</span>
+        <h2>Position &amp; filters</h2>
+        <span class="card-sub">What to search for, and how to narrow it down</span>
       </div>
       <form id="position-form" class="form">
         <div class="form-field">
@@ -44,17 +44,44 @@
             <option value="">Any</option>
           </select>
         </div>
+        <div class="form-field">
+          <label for="max-age-input">Max time since posted</label>
+          <select id="max-age-input">
+            <option value="">Any time</option>
+            <option value="1">Past 24 hours</option>
+            <option value="3">Past 3 days</option>
+            <option value="7">Past week</option>
+            <option value="14">Past 2 weeks</option>
+            <option value="30">Past month</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="max-results-input">Max results per site</label>
+          <select id="max-results-input">
+            <option value="">No limit</option>
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save</button>
           <span id="position-message" class="save-message"></span>
         </div>
       </form>
       <p class="note">
-        Both are used as the search query for Google Jobs (needs
-        <code>SERPAPI_KEY</code>), and as a title filter applied to every
-        Greenhouse/Lever/watchlist/site result -- seniority via keyword
+        Position/seniority are used as the search query for Google Jobs
+        (needs <code>SERPAPI_KEY</code>), and as a title filter applied to
+        every Greenhouse/Lever/watchlist/site result -- seniority via keyword
         matching (e.g. "senior", "staff", "junior"), so it's a heuristic, not
-        exact. Saved to <code>.env</code> — both the button below and the
+        exact. Max time since posted only applies where a real posted date is
+        available (Greenhouse, Lever, Google Jobs) -- sites searched with the
+        best-effort scraper below have no reliable date, so they're never
+        excluded by this filter. Max results per site caps how many raw
+        results are pulled from each individual board/site before filtering,
+        so it's mainly useful for large boards or to keep scraping polite.
+        Saved to <code>.env</code> — both the button below and the
         scheduler's automatic 8am run use whatever's saved here.
       </p>
     </section>

@@ -464,15 +464,23 @@ def delete_search_site(site_id: int):
 class SearchConfigUpdate(BaseModel):
     position_query: str
     seniority_level: str = ""
+    max_results_per_site: Optional[int] = None
+    max_age_days: Optional[int] = None
 
 
-@app.get("/api/search/config")
-def get_search_config():
+def _search_config_payload() -> dict:
     return {
         "position_query": config.SEARCH_POSITION_QUERY,
         "seniority_level": config.SEARCH_SENIORITY_LEVEL,
         "seniority_levels": [{"value": k, "label": v} for k, v in SENIORITY_LABELS.items()],
+        "max_results_per_site": config.SEARCH_MAX_RESULTS_PER_SITE,
+        "max_age_days": config.SEARCH_MAX_AGE_DAYS,
     }
+
+
+@app.get("/api/search/config")
+def get_search_config():
+    return _search_config_payload()
 
 
 @app.post("/api/search/config")
@@ -480,19 +488,22 @@ def update_search_config(body: SearchConfigUpdate):
     seniority = body.seniority_level.strip()
     if seniority and seniority not in SENIORITY_LABELS:
         raise HTTPException(400, f"seniority_level must be one of: {', '.join(SENIORITY_LABELS)} (or blank)")
+    if body.max_results_per_site is not None and body.max_results_per_site < 0:
+        raise HTTPException(400, "max_results_per_site must be 0 or a positive integer.")
+    if body.max_age_days is not None and body.max_age_days < 0:
+        raise HTTPException(400, "max_age_days must be 0 or a positive integer.")
 
     updates = {
         "SEARCH_POSITION_QUERY": body.position_query.strip(),
         "SEARCH_SENIORITY_LEVEL": seniority,
+        "SEARCH_MAX_RESULTS_PER_SITE": str(body.max_results_per_site) if body.max_results_per_site else "",
+        "SEARCH_MAX_AGE_DAYS": str(body.max_age_days) if body.max_age_days else "",
     }
     env_store.update_env_file(updates)
     for key, value in updates.items():
         os.environ[key] = value
     importlib.reload(config)
-    return {
-        "position_query": config.SEARCH_POSITION_QUERY,
-        "seniority_level": config.SEARCH_SENIORITY_LEVEL,
-    }
+    return _search_config_payload()
 
 
 @app.post("/api/search/run")
