@@ -1,0 +1,22 @@
+# Cloudflare Tunnel config -- gives the API a free public HTTPS URL without
+# opening any firewall port on the VM (the tunnel connects outbound only).
+#
+# Setup (run on the VM, once):
+#   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+#   sudo dpkg -i cloudflared.deb
+#   cloudflared tunnel login
+#   cloudflared tunnel create job-agent          # prints a <TUNNEL_ID> and writes credentials-file below
+#   cloudflared tunnel route dns job-agent api.yourdomain.com
+#
+# Then copy this file to /etc/cloudflared/config.yml, fill in the two
+# placeholders below, and:
+#   sudo cloudflared service install
+#   sudo systemctl start cloudflared
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: api.yourdomain.com
+    service: http://localhost:8000
+  - service: http_status:404

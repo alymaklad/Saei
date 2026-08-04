@@ -121,6 +121,9 @@ that do work:
   changes needed.
 - **Render / Fly.io / PythonAnywhere free tier** for `api.py` directly (Render's
   free web service sleeps when idle; Fly.io's free allowance stays warm).
+- **Google Cloud Compute Engine (Always Free e2-micro)** — same idea as the
+  Cloudflare Tunnel option above, on Google's forever-free VM instead of your
+  own machine. Step-by-step guide + deploy scripts: [`deploy/gcp/README.md`](deploy/gcp/README.md).
 
 ## Testing
 
@@ -145,6 +148,7 @@ scheduler.py            # APScheduler cron triggers -> automatic daily/weekly ex
 api.py                  # read-only FastAPI layer over the SQLite DB, for the frontend
 frontend/               # static off-white dashboard (index.html/style.css/app.js), no build step
 tests/                  # pytest suite
+deploy/gcp/             # Compute Engine (Always Free e2-micro) deploy scripts + guide
 ```
 
 ## Key cautions

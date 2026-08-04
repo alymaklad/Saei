@@ -1,0 +1,17 @@
+[Unit]
+Description=Job Application Agent - dashboard API (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=job-agent
+WorkingDirectory=/opt/job-agent
+EnvironmentFile=/opt/job-agent/.env
+# Bound to localhost only -- Cloudflare Tunnel reaches it from there.
+# No public port, no firewall rule needed, nothing exposed directly to the internet.
+ExecStart=/opt/job-agent/.venv/bin/uvicorn api:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
