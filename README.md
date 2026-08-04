@@ -72,8 +72,11 @@ To use free LLM scoring, pick one:
 - Install [Ollama](https://ollama.com), run `ollama pull llama3.1`, leave `LLM_PROVIDER=ollama`, or
 - Get a free [Gemini API key](https://aistudio.google.com/apikey) and set `LLM_PROVIDER=gemini` + `GEMINI_API_KEY`, or
 - Get a free [Groq API key](https://console.groq.com/keys) and set `LLM_PROVIDER=groq` + `GROQ_API_KEY`
-  (`GROQ_MODEL` defaults to `llama-3.3-70b-versatile`) — hosted, no local install, and generally
-  the fastest of the three since Groq runs on its own inference hardware.
+  (`GROQ_MODEL` defaults to `openai/gpt-oss-120b`; pick a different one from the dropdown on the
+  Settings page — Groq periodically retires models, check
+  [console.groq.com/docs/models](https://console.groq.com/docs/models) if a model stops working)
+  — hosted, no local install, and generally the fastest of the three since Groq runs on its own
+  inference hardware.
 
 All three are switchable from the dashboard's **Settings** page too, not just `.env`.
 

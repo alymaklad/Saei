@@ -64,7 +64,18 @@
           <span class="field-hint" id="groq-key-status"></span>
           <a class="field-hint" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a free Groq API key &rarr;</a>
           <label for="groq-model" class="form-field-secondary-label">Groq model</label>
-          <input type="text" id="groq-model" name="groq_model" placeholder="llama-3.3-70b-versatile">
+          <select id="groq-model" name="groq_model">
+            <option value="openai/gpt-oss-120b">openai/gpt-oss-120b — large, recommended default</option>
+            <option value="openai/gpt-oss-20b">openai/gpt-oss-20b — smaller, faster</option>
+            <option value="qwen/qwen3.6-27b">qwen/qwen3.6-27b — alternative general-purpose (preview)</option>
+            <option value="groq/compound">groq/compound — agentic, built-in web search/code exec</option>
+            <option value="groq/compound-mini">groq/compound-mini — smaller agentic variant</option>
+          </select>
+          <span class="field-hint">
+            Groq periodically retires models — if a saved model disappears from
+            this list it still shows up (added automatically) until you switch it.
+            <a href="https://console.groq.com/docs/models" target="_blank" rel="noopener">Current model list &rarr;</a>
+          </span>
         </div>
 
         <div class="form-actions">

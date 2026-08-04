@@ -21,7 +21,18 @@ async function loadSettings() {
     providerSelect.value = s.llm_provider;
     document.getElementById("ollama-model").value = s.ollama_model || "";
     document.getElementById("ollama-base-url").value = s.ollama_base_url || "";
-    document.getElementById("groq-model").value = s.groq_model || "";
+
+    const groqModelSelect = document.getElementById("groq-model");
+    if (s.groq_model && ![...groqModelSelect.options].some((o) => o.value === s.groq_model)) {
+      // Saved value isn't one of the current options (e.g. Groq retired it
+      // since this list was written) -- add it rather than silently
+      // switching the dropdown to something the user didn't choose.
+      const opt = document.createElement("option");
+      opt.value = s.groq_model;
+      opt.textContent = `${s.groq_model} (currently saved, not in the known list)`;
+      groqModelSelect.appendChild(opt);
+    }
+    groqModelSelect.value = s.groq_model || "openai/gpt-oss-120b";
     geminiKeyStatus.textContent = s.gemini_api_key_set
       ? "A Gemini API key is currently saved."
       : "No Gemini API key saved yet.";
