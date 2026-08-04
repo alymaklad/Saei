@@ -23,9 +23,10 @@ import config
 import cv_parser
 import env_store
 from agents import email_agent
+from agents.search_agent import parse_site_url
 from db import get_session, init_db
 from jobs.daily_run import run_daily_search_and_apply
-from models import Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog
+from models import Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog, SearchSite
 
 app = FastAPI(title="Job Application Agent API")
 
@@ -33,7 +34,7 @@ app = FastAPI(title="Job Application Agent API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -388,22 +389,96 @@ def list_reports(limit: int = 50):
     ]
 
 
-# ---- search: trigger a search-and-apply run from the dashboard --------------
+# ---- search: sites, position query, and triggering a run from the dashboard -
 
-class SearchRunRequest(BaseModel):
-    query: Optional[str] = None
+class AddSiteRequest(BaseModel):
+    url: str
+    label: Optional[str] = None
+
+
+@app.get("/api/search/sites")
+def list_search_sites():
+    with get_session() as session:
+        rows = session.query(SearchSite).order_by(SearchSite.date_added.desc()).all()
+        return [
+            {
+                "id": r.id,
+                "url": r.url,
+                "site_type": r.site_type,
+                "identifier": r.identifier,
+                "label": r.label,
+                "date_added": r.date_added.isoformat() if r.date_added else None,
+            }
+            for r in rows
+        ]
+
+
+@app.post("/api/search/sites")
+def add_search_site(body: AddSiteRequest):
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(400, "URL is required.")
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
+    site_type, identifier = parse_site_url(url)
+
+    with get_session() as session:
+        existing = session.query(SearchSite).filter(SearchSite.url == url).first()
+        if existing:
+            raise HTTPException(400, "That site is already in your list.")
+
+        row = SearchSite(url=url, site_type=site_type, identifier=identifier, label=body.label)
+        session.add(row)
+        session.flush()
+        return {
+            "id": row.id,
+            "url": row.url,
+            "site_type": row.site_type,
+            "identifier": row.identifier,
+            "label": row.label,
+            "date_added": row.date_added.isoformat() if row.date_added else None,
+        }
+
+
+@app.delete("/api/search/sites/{site_id}")
+def delete_search_site(site_id: int):
+    with get_session() as session:
+        row = session.query(SearchSite).filter(SearchSite.id == site_id).first()
+        if not row:
+            raise HTTPException(404, "Site not found.")
+        session.delete(row)
+    return {"status": "deleted"}
+
+
+class SearchConfigUpdate(BaseModel):
+    position_query: str
+
+
+@app.get("/api/search/config")
+def get_search_config():
+    return {"position_query": config.SEARCH_POSITION_QUERY}
+
+
+@app.post("/api/search/config")
+def update_search_config(body: SearchConfigUpdate):
+    env_store.update_env_file({"SEARCH_POSITION_QUERY": body.position_query.strip()})
+    os.environ["SEARCH_POSITION_QUERY"] = body.position_query.strip()
+    importlib.reload(config)
+    return {"position_query": config.SEARCH_POSITION_QUERY}
 
 
 @app.post("/api/search/run")
-def run_search_now(body: SearchRunRequest = SearchRunRequest()):
+def run_search_now():
     """
     Runs the same search-and-apply pipeline the scheduler fires at 8am, on
-    demand. Blocks until it's done -- can take a while (one LLM call per new
-    job found) -- which is why the frontend shows a "this may take a few
-    minutes" message rather than a spinner that implies it'll be instant.
+    demand, using the currently saved position query and site list. Blocks
+    until it's done -- can take a while (one LLM call per new job found) --
+    which is why the frontend shows a "this may take a few minutes" message
+    rather than a spinner that implies it'll be instant.
     """
     try:
-        return run_daily_search_and_apply(query=body.query or "")
+        return run_daily_search_and_apply()
     except RuntimeError as exc:
         # e.g. no CV uploaded yet -- a config problem, not a server error
         raise HTTPException(400, str(exc))

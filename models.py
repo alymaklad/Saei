@@ -64,6 +64,19 @@ class EmailLog(Base):
     sent_at = Column(DateTime, default=_utcnow)
 
 
+class SearchSite(Base):
+    """A user-added website to search for jobs on, beyond the .env-configured
+    GREENHOUSE_BOARD_TOKENS/LEVER_COMPANY_SLUGS lists. Managed from the Search
+    tab instead of by hand-editing .env."""
+    __tablename__ = "search_sites"
+    id = Column(Integer, primary_key=True)
+    url = Column(String, unique=True, nullable=False)
+    site_type = Column(String)            # "greenhouse" | "lever" | "generic"
+    identifier = Column(String, nullable=True)  # board token / company slug, None for generic
+    label = Column(String, nullable=True)
+    date_added = Column(DateTime, default=_utcnow)
+
+
 class ReportLog(Base):
     """One row per daily/weekly report send attempt -- what the Reports tab lists."""
     __tablename__ = "report_logs"

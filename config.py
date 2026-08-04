@@ -28,6 +28,11 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 GREENHOUSE_BOARD_TOKENS = _list("GREENHOUSE_BOARD_TOKENS")
 LEVER_COMPANY_SLUGS = _list("LEVER_COMPANY_SLUGS")
 
+# Default position/title to search for -- used by the Search tab's "search
+# now" button and by the scheduler's automatic 8am run alike, so both stay in
+# sync with whatever the user last saved. Blank means "no title filter".
+SEARCH_POSITION_QUERY = os.getenv("SEARCH_POSITION_QUERY", "")
+
 # Google Sheets watchlist
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "credentials/service_account.json")

@@ -113,33 +113,5 @@ function refreshDashboard() {
   loadNews();
 }
 
-const searchBtn = document.getElementById("search-btn");
-const searchMessage = document.getElementById("search-message");
-
-searchBtn.addEventListener("click", async () => {
-  searchBtn.disabled = true;
-  searchMessage.textContent = "Searching… this can take a few minutes (one LLM call per new job found).";
-  searchMessage.className = "save-message search-message";
-
-  try {
-    const query = document.getElementById("search-query").value.trim();
-    const result = await postJSON("/api/search/run", { query: query || null });
-
-    const parts = [`${result.found} job(s) found`, `${result.processed.length} new`];
-    if (result.errors.length) parts.push(`${result.errors.length} failed`);
-    searchMessage.textContent = parts.join(", ") + ".";
-    searchMessage.className = result.errors.length
-      ? "save-message search-message save-error"
-      : "save-message search-message save-success";
-
-    refreshDashboard();
-  } catch (e) {
-    searchMessage.textContent = e.message || "Search failed.";
-    searchMessage.className = "save-message search-message save-error";
-  } finally {
-    searchBtn.disabled = false;
-  }
-});
-
 loadFooterStatus();
 refreshDashboard();

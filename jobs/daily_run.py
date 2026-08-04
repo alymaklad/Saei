@@ -2,6 +2,7 @@
 import json
 from datetime import datetime, timezone
 
+import config
 from db import get_session, init_db
 from models import Job, Application, SkillGap
 from agents.search_agent import run_search
@@ -55,7 +56,13 @@ def _process_one_job(session, raw_job: dict, cv_text: str) -> dict:
     return {"title": job_row.title, "company": job_row.company, "status": app_row.status}
 
 
-def run_daily_search_and_apply(cv_path: str | None = None, query: str = "") -> dict:
+def run_daily_search_and_apply(cv_path: str | None = None, position: str | None = None) -> dict:
+    """
+    `position` defaults to config.SEARCH_POSITION_QUERY (the value saved from
+    the Search tab) when not explicitly passed, so the 8am scheduler run and
+    any CLI invocation automatically stay in sync with whatever's saved --
+    only pass it explicitly to override for a single run.
+    """
     init_db()
     cv_path = cv_path or find_default_cv("cv")
     if not cv_path:
@@ -64,7 +71,8 @@ def run_daily_search_and_apply(cv_path: str | None = None, query: str = "") -> d
             "file at cv/current_cv.pdf or cv/current_cv.docx."
         )
     cv_text = parse_cv(cv_path)
-    found = run_search(query=query)
+    position = position if position is not None else config.SEARCH_POSITION_QUERY
+    found = run_search(position=position)
 
     processed = []
     errors = []

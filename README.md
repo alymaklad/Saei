@@ -143,15 +143,29 @@ This is the one part of the system meant to be verified per employer, not automa
 `api.py` is a FastAPI layer over the same SQLite DB the agents write to, plus
 endpoints that write local config, upload files, and trigger sends for a
 single user. `frontend/` is a static, dependency-free HTML/CSS/JS dashboard
-(off-white, minimalist) — no build step required. Six pages, linked from the
+(off-white, minimalist) — no build step required. Seven pages, linked from the
 nav bar on every page:
 
-- **Dashboard** (`index.html`) — stats, applications table, skill gaps, latest
-  news digest, and a **Search for jobs** button that runs the same
-  search-and-apply pipeline the scheduler fires at 8am, on demand (optional
-  keyword field for the SerpAPI/Google Jobs source). Blocks while running --
-  can take a few minutes since it's one LLM call per new job found -- and
-  refreshes the rest of the dashboard when it's done.
+- **Dashboard** (`index.html`) — stats, applications table, skill gaps, and
+  latest news digest.
+- **Search** (`search.html`) — configures what the search-and-apply pipeline
+  looks for, in three parts:
+  - **Position** — a job title/keyword, saved to `.env`
+    (`SEARCH_POSITION_QUERY`). Used as the literal query for SerpAPI/Google
+    Jobs, and as a case-insensitive title filter applied to every other
+    source (Greenhouse, Lever, watchlist, added sites). Leave blank to pull
+    everything configured with no filter.
+  - **Job boards** — add any website URL. Greenhouse/Lever URLs are detected
+    automatically and searched via their public APIs, same as the
+    `.env`-configured boards; any other URL falls back to a best-effort
+    scraper (`agents/search_agent.py::search_generic_site`) that looks for
+    same-site links that look job-related — noisier than the API-backed
+    path, and worth checking a site's Terms of Service before adding it.
+    Stored in the `search_sites` table, editable (add/remove) from this page.
+  - **Search now** — runs the same pipeline the scheduler fires at 8am, on
+    demand, using whatever position/sites are currently saved. Blocks while
+    running -- can take a few minutes since it's one LLM call per new job
+    found.
 - **Settings** (`settings.html`) — choose the LLM provider (Ollama or Gemini)
   and enter/replace the Gemini API key. Saved to `.env` on the machine running
   `api.py` (`env_store.py` upserts the specific keys, preserving everything
@@ -246,7 +260,7 @@ environment.yml         # conda env definition, installs from requirements.txt
 run.bat                 # Windows one-click launcher (venv): API + scheduler + dashboard
 run_conda.bat           # same, but creates/activates the conda env instead
 create_desktop_shortcut.vbs  # one-time: creates a Desktop shortcut to run.bat
-frontend/               # off-white dashboard: index/settings/cv/email/reports/features.html + config.js, no build step
+frontend/               # off-white dashboard: index/search/settings/cv/email/reports/features.html + config.js, no build step
 tests/                  # pytest suite
 deploy/gcp/             # Compute Engine (Always Free e2-micro) deploy scripts + guide
 ```

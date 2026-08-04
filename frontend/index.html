@@ -19,24 +19,13 @@
 
   <nav class="mainnav">
     <a href="index.html" class="navlink active">Dashboard</a>
+    <a href="search.html" class="navlink">Search</a>
     <a href="settings.html" class="navlink">Settings</a>
     <a href="cv.html" class="navlink">CV</a>
     <a href="email.html" class="navlink">Email</a>
     <a href="reports.html" class="navlink">Reports</a>
     <a href="features.html" class="navlink">Features</a>
   </nav>
-
-  <section class="card search-card">
-    <div class="card-header">
-      <h2>Search for jobs</h2>
-      <span class="card-sub">Runs the same pipeline as the 8am scheduler, on demand</span>
-    </div>
-    <div class="search-body">
-      <input type="text" id="search-query" placeholder="Optional keyword for Google Jobs (needs SERPAPI_KEY) — leave blank to just search Greenhouse/Lever/watchlist">
-      <button type="button" id="search-btn" class="btn btn-primary">Search for jobs</button>
-    </div>
-    <p id="search-message" class="save-message search-message"></p>
-  </section>
 
   <section class="stats-grid" id="stats-grid">
     <div class="stat-card"><span class="stat-value" id="stat-jobs">&mdash;</span><span class="stat-label">Jobs found</span></div>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent — Search</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink">Dashboard</a>
+    <a href="search.html" class="navlink active">Search</a>
+    <a href="settings.html" class="navlink">Settings</a>
+    <a href="cv.html" class="navlink">CV</a>
+    <a href="email.html" class="navlink">Email</a>
+    <a href="reports.html" class="navlink">Reports</a>
+    <a href="features.html" class="navlink">Features</a>
+  </nav>
+
+  <main class="narrow-main">
+    <section class="card">
+      <div class="card-header">
+        <h2>Position</h2>
+        <span class="card-sub">Job title/keyword to search for</span>
+      </div>
+      <form id="position-form" class="form">
+        <div class="form-field">
+          <label for="position-input">Position</label>
+          <input type="text" id="position-input" placeholder="e.g. Backend Engineer — leave blank to search everything with no title filter">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <span id="position-message" class="save-message"></span>
+        </div>
+      </form>
+      <p class="note">
+        Used as the search query for Google Jobs (needs <code>SERPAPI_KEY</code>),
+        and as a title filter applied to every Greenhouse/Lever/watchlist/site
+        result. Saved to <code>.env</code> — both the button below and the
+        scheduler's automatic 8am run use whatever's saved here.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Job boards</h2>
+        <span class="card-sub">Websites to search, in addition to <code>.env</code></span>
+      </div>
+      <form id="add-site-form" class="form">
+        <div class="form-field">
+          <label for="site-url-input">Website URL</label>
+          <input type="text" id="site-url-input" placeholder="https://boards.greenhouse.io/acme, https://jobs.lever.co/acme, or any careers page">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Add site</button>
+          <span id="site-message" class="save-message"></span>
+        </div>
+      </form>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th>Type</th>
+              <th>Added</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="sites-body">
+            <tr><td colspan="4" class="empty">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        Greenhouse/Lever URLs are detected automatically and searched via
+        their public APIs, same as the <code>.env</code>-configured boards.
+        Any other URL is searched with a best-effort scraper — it looks for
+        same-site links that look job-related, so results can be noisier and
+        depend on the site's structure. Respect each site's Terms of Service
+        before adding it.
+      </p>
+    </section>
+
+    <section class="card search-card">
+      <div class="card-header">
+        <h2>Search for jobs</h2>
+        <span class="card-sub">Runs the same pipeline as the 8am scheduler, on demand</span>
+      </div>
+      <div class="search-body">
+        <button type="button" id="search-btn" class="btn btn-primary">Search now</button>
+      </div>
+      <p id="search-message" class="save-message search-message"></p>
+    </section>
+  </main>
+
+</div>
+
+<script src="config.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

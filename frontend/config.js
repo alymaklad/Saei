@@ -19,6 +19,13 @@ async function postJSON(path, body) {
   return data;
 }
 
+async function deleteJSON(path) {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `${path} -> ${res.status}`);
+  return data;
+}
+
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
