@@ -30,7 +30,8 @@ Built entirely on free tools — see [Tech stack](#tech-stack) below.
 | LLM | Ollama (local, free) or Gemini API free tier |
 | Job search | Greenhouse + Lever public APIs (free), SerpAPI free tier (100/mo, optional) |
 | Watchlist | Google Sheets via `gspread` (free service account) |
-| CV parsing | `pdfplumber` / `python-docx` |
+| CV parsing | `pdfplumber` / `python-docx` (reads your uploaded .pdf/.docx) |
+| Tailored CV output | `reportlab` (renders each rewrite as a real formatted .pdf) |
 | Email | Gmail API (OAuth, your own account, free) |
 | Reports | Telegram Bot API (free, unlimited) |
 | Scheduling | APScheduler |

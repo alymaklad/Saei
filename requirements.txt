@@ -18,3 +18,4 @@ pytest
 fastapi
 uvicorn
 python-multipart
+reportlab

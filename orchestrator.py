@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, END
 
 import config
 from agents.ats_agent import compute_ats_score
-from agents.cv_rewriter_agent import rewrite_cv, save_cv_as_docx
+from agents.cv_rewriter_agent import rewrite_cv, save_cv_as_pdf
 from agents.apply_agent import decide_apply_path, draft_for_review, auto_submit_greenhouse
 
 FIT_THRESHOLD = 0.7
@@ -44,8 +44,8 @@ def rewrite_node(state: State) -> State:
     state["cv_rewritten"] = rewritten
 
     job_id = state["job"].get("id", "job")
-    out_path = f"cv_output/cv_{job_id}.docx"
-    save_cv_as_docx(rewritten, out_path)
+    out_path = f"cv_output/cv_{job_id}.pdf"
+    save_cv_as_pdf(rewritten, out_path)
     state["cv_path"] = out_path
     state["status"] = "cv_rewritten_notify_user"
     state["result"] = {"status": state["status"], "cv_path": out_path, "ats_result": state["ats_result"]}
