@@ -44,7 +44,23 @@ def rewrite_cv(cv_text: str, job_description: str, missing_skills: list[str]) ->
         )),
     ]
     resp = llm.invoke(messages)
-    return resp.content
+    content = (resp.content or "").strip()
+    if not content:
+        # Seen in practice with Groq's gpt-oss models: on a long prompt they
+        # can spend their whole completion-token budget on internal reasoning
+        # and return content="" with finish_reason="length" -- HTTP 200, no
+        # exception, which silently produced a blank tailored-CV PDF before
+        # this check existed. Raising here routes it through daily_run.py's
+        # per-job error handling instead of writing an empty file.
+        reason = getattr(resp, "response_metadata", {}).get("finish_reason", "unknown")
+        raise RuntimeError(
+            f"CV rewrite came back empty (finish_reason={reason}). This usually "
+            "means the model ran out of its token budget on internal reasoning "
+            "before writing the CV, or the provider's daily quota is exhausted. "
+            "Try again, lower 'Max results per site' to send fewer requests, or "
+            "switch provider/model in Settings."
+        )
+    return content
 
 
 def save_cv_as_docx(cv_text: str, output_path: str):
