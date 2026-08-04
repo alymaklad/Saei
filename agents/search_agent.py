@@ -239,6 +239,11 @@ def search_generic_site(url: str, position: str = "", max_candidates: int | None
     return jobs
 
 
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower())
+    return slug.strip("-")
+
+
 # Known job boards that (a) are server-rendered -- a plain HTTP GET returns
 # real job links, no JavaScript needed -- and (b) don't block unauthenticated
 # requests, verified by directly fetching each one's raw HTML and checking for
@@ -249,9 +254,30 @@ def search_generic_site(url: str, position: str = "", max_candidates: int | None
 # nothing. Automatically searched whenever `position` is set, in addition to
 # whatever's in the manually-managed Search tab site list, so a useful search
 # works without the user having to find/paste board URLs themselves.
+#
+# Each entry is a build_url(position) -> str|None callable rather than a
+# plain "?param={query}" template, because sites vary in how (or whether) a
+# query string actually filters results for an unauthenticated request --
+# verified per site, not assumed:
+#   - Wuzzuf's ?q= query string genuinely filters server-side.
+#   - Bayt's ?keyword= query string does NOT filter for a plain request (it
+#     silently serves generic, unrelated listings -- confirmed by testing:
+#     searching "Ai Engineer" that way returned "Civil Rights Attorney" and
+#     similar unrelated jobs). Bayt's real search only works through its
+#     canonical SEO slug pages (e.g. /en/international/jobs/ai-engineer-jobs/),
+#     confirmed working across several different job titles.
 KNOWN_JOB_BOARD_TEMPLATES = {
-    "wuzzuf": {"label": "Wuzzuf", "url_template": "https://wuzzuf.net/search/jobs/?q={query}"},
-    "bayt": {"label": "Bayt.com", "url_template": "https://www.bayt.com/en/jobs/?keyword={query}"},
+    "wuzzuf": {
+        "label": "Wuzzuf",
+        "build_url": lambda position: f"https://wuzzuf.net/search/jobs/?q={quote_plus(position)}",
+    },
+    "bayt": {
+        "label": "Bayt.com",
+        "build_url": lambda position: (
+            f"https://www.bayt.com/en/international/jobs/{_slugify(position)}-jobs/"
+            if _slugify(position) else None
+        ),
+    },
 }
 
 
@@ -260,11 +286,12 @@ def auto_discovered_sites(position: str) -> list[dict]:
     position means no query to search with, so this returns nothing."""
     if not position:
         return []
-    query = quote_plus(position)
-    return [
-        {"key": key, "label": meta["label"], "url": meta["url_template"].format(query=query)}
-        for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items()
-    ]
+    sites = []
+    for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items():
+        url = meta["build_url"](position)
+        if url:
+            sites.append({"key": key, "label": meta["label"], "url": url})
+    return sites
 
 
 def search_serpapi(query: str) -> list[dict]:
