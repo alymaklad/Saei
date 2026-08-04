@@ -57,6 +57,18 @@ Put your CV at `cv/current_cv.pdf` (or `.docx`) before running the daily job.
 
 ## Running it
 
+**Windows, one click:** double-click `run.bat`. First run copies `.env.example`
+to `.env` and opens it in Notepad so you can fill in real values — save, close,
+and double-click `run.bat` again. After that it starts the API, the scheduler,
+and opens the dashboard in your browser every time.
+
+To get a proper Desktop icon instead of digging into the project folder each
+time, double-click `create_desktop_shortcut.vbs` once — it creates a
+"Job Application Agent" shortcut on your Desktop that runs `run.bat`. One-time
+setup; the shortcut itself is reusable forever.
+
+**Manually / other OS:**
+
 ```bash
 # one-off: search everything configured, score, draft/apply
 python jobs/daily_run.py
@@ -66,10 +78,17 @@ python jobs/apply_from_link.py "https://boards.greenhouse.io/acme/jobs/123" cv/c
 
 # start the always-on scheduler (daily search 08:00, daily report 20:00, weekly news Mon 09:00)
 python scheduler.py
+
+# dashboard API + frontend, in separate terminals
+uvicorn api:app --host 127.0.0.1 --port 8000
+python -m http.server 5500 --directory frontend
 ```
 
-Deploy `scheduler.py` on any always-on host (small VPS, Fly.io, a cron-triggered
-GitHub Action) to make the three triggers run automatically without you present.
+This is a local-only setup: the API, scheduler, and dashboard all run on your
+own machine, so everything stops when your machine sleeps or shuts down —
+there's no cloud host or scheduler keeping it running while you're away. See
+[Deployment](#deployment) if you want it running unattended on always-on
+infrastructure instead.
 
 ## Enabling auto-submit
 
@@ -146,6 +165,8 @@ orchestrator.py        # LangGraph state machine wiring the agents together
 jobs/                  # entry points: daily_run, daily_report, weekly_news, apply_from_link
 scheduler.py            # APScheduler cron triggers -> automatic daily/weekly execution
 api.py                  # read-only FastAPI layer over the SQLite DB, for the frontend
+run.bat                 # Windows one-click launcher: API + scheduler + dashboard
+create_desktop_shortcut.vbs  # one-time: creates a Desktop shortcut to run.bat
 frontend/               # static off-white dashboard (index.html/style.css/app.js), no build step
 tests/                  # pytest suite
 deploy/gcp/             # Compute Engine (Always Free e2-micro) deploy scripts + guide
