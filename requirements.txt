@@ -15,3 +15,5 @@ google-auth
 gspread
 apscheduler
 pytest
+fastapi
+uvicorn

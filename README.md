@@ -87,6 +87,41 @@ Before whitelisting a board:
 
 This is the one part of the system meant to be verified per employer, not automated blindly.
 
+## Frontend + dashboard API
+
+`api.py` is a thin read-only FastAPI layer over the same SQLite DB the agents
+write to. `frontend/` is a static, dependency-free HTML/CSS/JS dashboard
+(off-white, minimalist) that reads from it — no build step required.
+
+```bash
+# backend (serves /api/*)
+uvicorn api:app --reload --port 8000
+
+# frontend — just open the file, or serve it
+python -m http.server 5500 --directory frontend
+```
+
+Before deploying, edit `frontend/app.js` and change `API_BASE` to wherever
+`api.py` ends up running (see [Deployment](#deployment)).
+
+## Deployment
+
+**Frontend** — it's static files, so any free static host works: Cloudflare
+Pages, Netlify, Vercel, or GitHub Pages. Cloudflare Pages is a solid default:
+unlimited bandwidth, no build step needed (publish `frontend/` as-is).
+
+**Backend (`api.py` + `scheduler.py`)** — this needs a real, persistent Python
+process (SQLite file, LangGraph, APScheduler), which **Cloudflare Workers/Pages
+Functions can't run** — their Python runtime is WASM-based (Pyodide) and
+doesn't support SQLite's C extension or long-running schedulers. Free options
+that do work:
+- **Cloudflare Pages (frontend) + Cloudflare Tunnel (backend).** Run `api.py`
+  and `scheduler.py` on your own machine or a free VM, and use `cloudflared`
+  to give it a free public HTTPS URL — no separate hosting bill, and no code
+  changes needed.
+- **Render / Fly.io / PythonAnywhere free tier** for `api.py` directly (Render's
+  free web service sleeps when idle; Fly.io's free allowance stays warm).
+
 ## Testing
 
 ```bash
@@ -107,6 +142,8 @@ agents/                # one module per capability (search, ats, rewrite, apply,
 orchestrator.py        # LangGraph state machine wiring the agents together
 jobs/                  # entry points: daily_run, daily_report, weekly_news, apply_from_link
 scheduler.py            # APScheduler cron triggers -> automatic daily/weekly execution
+api.py                  # read-only FastAPI layer over the SQLite DB, for the frontend
+frontend/               # static off-white dashboard (index.html/style.css/app.js), no build step
 tests/                  # pytest suite
 ```
 

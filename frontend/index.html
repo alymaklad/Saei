@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <section class="stats-grid" id="stats-grid">
+    <div class="stat-card"><span class="stat-value" id="stat-jobs">&mdash;</span><span class="stat-label">Jobs found</span></div>
+    <div class="stat-card"><span class="stat-value" id="stat-apps">&mdash;</span><span class="stat-label">Applications</span></div>
+    <div class="stat-card"><span class="stat-value" id="stat-pending">&mdash;</span><span class="stat-label">Pending review</span></div>
+    <div class="stat-card"><span class="stat-value" id="stat-auto">&mdash;</span><span class="stat-label">Auto-submitted</span></div>
+    <div class="stat-card"><span class="stat-value" id="stat-emails">&mdash;</span><span class="stat-label">Emails sent</span></div>
+  </section>
+
+  <main class="main-grid">
+    <section class="card applications-card">
+      <div class="card-header">
+        <h2>Applications</h2>
+        <span class="card-sub" id="applications-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="applications-table">
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Company</th>
+              <th>Source</th>
+              <th>ATS score</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="applications-body">
+            <tr><td colspan="6" class="empty">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="side-column">
+      <section class="card">
+        <div class="card-header"><h2>Skill gaps</h2></div>
+        <ul class="skill-list" id="skill-gaps-list">
+          <li class="empty">Loading&hellip;</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <div class="card-header"><h2>Latest news digest</h2></div>
+        <div id="news-content" class="news-content">Loading&hellip;</div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <span>Whitelisted sources: <strong id="whitelist-value">&mdash;</strong></span>
+    <span>LLM provider: <strong id="llm-value">&mdash;</strong></span>
+  </footer>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
