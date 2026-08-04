@@ -182,9 +182,18 @@ nav bar on every page:
     row, or added site *before* any filtering -- useful for a large board
     (some return 500+ jobs) or to keep the generic scraper's per-page
     fetching polite. Defaults to no limit, matching the original behavior.
-  - **Job boards** — add any website URL. Greenhouse/Lever URLs are detected
-    automatically and searched via their public APIs, same as the
-    `.env`-configured boards; any other URL falls back to a best-effort
+  - **Automatic job boards** — whenever Position is set, Wuzzuf and Bayt.com
+    are searched automatically with no setup (`agents/search_agent.py::
+    KNOWN_JOB_BOARD_TEMPLATES`, currently those two). Both were confirmed
+    server-rendered and scrapable with a plain unauthenticated request
+    before being added; LinkedIn and Indeed were tested the same way and
+    both block unauthenticated requests outright (LinkedIn returns its
+    anti-bot HTTP 999, Indeed a 403), so they're deliberately excluded --
+    adding either manually to the list below won't work either.
+  - **Job boards** — add any *additional* website URL (a specific company's
+    board, or another site not in the automatic list). Greenhouse/Lever URLs
+    are detected automatically and searched via their public APIs, same as
+    the `.env`-configured boards; any other URL falls back to a best-effort
     scraper (`agents/search_agent.py::search_generic_site`) that looks for
     same-site links that look job-related — noisier than the API-backed
     path, and worth checking a site's Terms of Service before adding it.

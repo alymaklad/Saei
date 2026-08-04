@@ -89,7 +89,7 @@
     <section class="card">
       <div class="card-header">
         <h2>Job boards</h2>
-        <span class="card-sub">Websites to search, in addition to <code>.env</code></span>
+        <span class="card-sub">Extra websites to search, on top of what's automatic below</span>
       </div>
       <form id="add-site-form" class="form">
         <div class="form-field">
@@ -117,12 +117,18 @@
         </table>
       </div>
       <p class="note">
-        Greenhouse/Lever URLs are detected automatically and searched via
-        their public APIs, same as the <code>.env</code>-configured boards.
-        Any other URL is searched with a best-effort scraper — it looks for
-        same-site links that look job-related, so results can be noisier and
-        depend on the site's structure. Respect each site's Terms of Service
-        before adding it.
+        Whenever Position (above) is set, Wuzzuf and Bayt.com are searched
+        automatically — no need to add them here. Both were verified to
+        return real results with a plain, unauthenticated request; LinkedIn
+        and Indeed were tested too and block that outright, so they're not
+        included and won't work if you add them manually either. Use this
+        list for specific companies (Greenhouse/Lever boards) or other sites
+        you want searched in addition to the automatic ones. Greenhouse/Lever
+        URLs are detected automatically and searched via their public APIs,
+        same as the <code>.env</code>-configured boards. Any other URL is
+        searched with a best-effort scraper — it looks for same-site links
+        that look job-related, so results can be noisier and depend on the
+        site's structure. Respect each site's Terms of Service before adding it.
       </p>
     </section>
 

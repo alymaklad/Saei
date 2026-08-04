@@ -8,11 +8,14 @@ Free sources, in priority order:
   4. Sites added from the dashboard's Search tab — Greenhouse/Lever URLs reuse
      the API-backed paths above; anything else falls back to a best-effort
      generic scrape (see search_generic_site)
-  5. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
+  5. KNOWN_JOB_BOARD_TEMPLATES — verified-scrapable job boards (currently
+     Wuzzuf, Bayt.com) searched automatically from the `position` field, no
+     URL-adding required
+  6. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
 """
 import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import requests
 
@@ -236,6 +239,34 @@ def search_generic_site(url: str, position: str = "", max_candidates: int | None
     return jobs
 
 
+# Known job boards that (a) are server-rendered -- a plain HTTP GET returns
+# real job links, no JavaScript needed -- and (b) don't block unauthenticated
+# requests, verified by directly fetching each one's raw HTML and checking for
+# real job links before adding it here. Both currently listed are MENA-focused
+# (Wuzzuf: Egypt, Bayt: Gulf/MENA); LinkedIn and Indeed were tested too and
+# both block unauthenticated requests outright (HTTP 999 / 403), so they're
+# deliberately not included -- adding them here would just silently return
+# nothing. Automatically searched whenever `position` is set, in addition to
+# whatever's in the manually-managed Search tab site list, so a useful search
+# works without the user having to find/paste board URLs themselves.
+KNOWN_JOB_BOARD_TEMPLATES = {
+    "wuzzuf": {"label": "Wuzzuf", "url_template": "https://wuzzuf.net/search/jobs/?q={query}"},
+    "bayt": {"label": "Bayt.com", "url_template": "https://www.bayt.com/en/jobs/?keyword={query}"},
+}
+
+
+def auto_discovered_sites(position: str) -> list[dict]:
+    """Builds search URLs for KNOWN_JOB_BOARD_TEMPLATES from `position`. No
+    position means no query to search with, so this returns nothing."""
+    if not position:
+        return []
+    query = quote_plus(position)
+    return [
+        {"key": key, "label": meta["label"], "url": meta["url_template"].format(query=query)}
+        for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items()
+    ]
+
+
 def search_serpapi(query: str) -> list[dict]:
     if not config.SERPAPI_KEY:
         return []  # free-tier key not configured — skip rather than error
@@ -306,10 +337,12 @@ def run_search(
 ) -> tuple[list[dict], list[dict]]:
     """
     Pulls from every configured free source and tags each job with its
-    source. `position` (a job title/keyword) is used two ways: as part of the
-    SerpAPI query, and as a case-insensitive title filter applied to every
-    other source (Greenhouse/Lever/watchlist/dashboard-added sites) so one
-    field controls relevance everywhere. `seniority` (one of "intern",
+    source. `position` (a job title/keyword) is used three ways: as part of
+    the SerpAPI query, as the query for KNOWN_JOB_BOARD_TEMPLATES (Wuzzuf,
+    Bayt.com -- automatically searched whenever position is set, no manual
+    site-adding required), and as a case-insensitive title filter applied to
+    every other source (Greenhouse/Lever/watchlist/dashboard-added sites) so
+    one field controls relevance everywhere. `seniority` (one of "intern",
     "entry", "mid", "senior", "lead", "manager") works the same way -- also
     folded into the SerpAPI query, and matched against titles via keyword
     heuristics (see SENIORITY_KEYWORDS) for every other source. Leave both
@@ -361,6 +394,9 @@ def run_search(
                 broad += search_generic_site(site["url"], position=position, max_candidates=max_results_per_site)
         except requests.RequestException as exc:
             source_errors.append({"source": site["site_type"], "identifier": site["url"], "error": str(exc)})
+
+    for auto_site in auto_discovered_sites(position):
+        broad += search_generic_site(auto_site["url"], position=position, max_candidates=max_results_per_site)
 
     if position:
         needle = position.lower()
