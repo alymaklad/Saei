@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent — Settings</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink">Dashboard</a>
+    <a href="settings.html" class="navlink active">Settings</a>
+    <a href="cv.html" class="navlink">CV</a>
+    <a href="features.html" class="navlink">Features</a>
+  </nav>
+
+  <main class="narrow-main">
+    <section class="card">
+      <div class="card-header">
+        <h2>LLM provider</h2>
+        <span class="card-sub">Used for ATS scoring and CV rewriting</span>
+      </div>
+
+      <form id="settings-form" class="form">
+        <div class="form-field">
+          <label for="llm-provider">API provider</label>
+          <select id="llm-provider" name="llm_provider">
+            <option value="ollama">Ollama (local, free, no key)</option>
+            <option value="gemini">Google Gemini (free tier, needs an API key)</option>
+          </select>
+        </div>
+
+        <div class="form-field" id="ollama-fields">
+          <label for="ollama-model">Ollama model</label>
+          <input type="text" id="ollama-model" name="ollama_model" placeholder="llama3.1">
+          <label for="ollama-base-url" class="form-field-secondary-label">Ollama base URL</label>
+          <input type="text" id="ollama-base-url" name="ollama_base_url" placeholder="http://localhost:11434">
+        </div>
+
+        <div class="form-field" id="gemini-fields">
+          <label for="gemini-api-key">Gemini API key</label>
+          <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
+          <span class="field-hint" id="gemini-key-status"></span>
+          <a class="field-hint" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free Gemini API key &rarr;</a>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <span id="save-message" class="save-message"></span>
+        </div>
+      </form>
+
+      <p class="note">
+        Saved to <code>.env</code> on the machine running the API. Takes effect
+        immediately for the dashboard API itself; the scheduler runs as a
+        separate process and needs a restart (close and re-run
+        <code>run.bat</code> / <code>run_conda.bat</code>) to pick up changes.
+      </p>
+    </section>
+  </main>
+
+</div>
+
+<script src="config.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>

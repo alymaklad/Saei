@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent — CV</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink">Dashboard</a>
+    <a href="settings.html" class="navlink">Settings</a>
+    <a href="cv.html" class="navlink active">CV</a>
+    <a href="features.html" class="navlink">Features</a>
+  </nav>
+
+  <main class="narrow-main">
+    <section class="card">
+      <div class="card-header">
+        <h2>Current CV</h2>
+        <span class="card-sub">Used by every search-and-apply run</span>
+      </div>
+      <div id="cv-current" class="cv-current">Loading&hellip;</div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Upload a new CV</h2>
+        <span class="card-sub">.pdf or .docx</span>
+      </div>
+      <div class="upload-body">
+        <label id="dropzone" class="dropzone" for="cv-file-input">
+          <span id="dropzone-text">Drag a file here, or click to choose one</span>
+          <input type="file" id="cv-file-input" accept=".pdf,.docx" hidden>
+        </label>
+        <div class="form-actions">
+          <button type="button" id="upload-btn" class="btn btn-primary" disabled>Upload</button>
+          <span id="upload-message" class="save-message"></span>
+        </div>
+        <p class="note">
+          Replaces the current CV — only one is active at a time. Every board
+          gets tailored copies derived from this file when the ATS score is
+          below the fit threshold; the original itself is never overwritten.
+        </p>
+      </div>
+    </section>
+  </main>
+
+</div>
+
+<script src="config.js"></script>
+<script src="cv.js"></script>
+</body>
+</html>

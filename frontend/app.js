@@ -1,13 +1,5 @@
-// Point this at wherever api.py is running before you deploy.
-// Locally: http://localhost:8000. Deployed: your backend's public URL
-// (e.g. a Cloudflare Tunnel URL, or your Render/Fly.io URL).
-const API_BASE = window.JOB_AGENT_API_BASE || "http://localhost:8000";
-
-async function getJSON(path) {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
-  return res.json();
-}
+// Dashboard page only. Shared helpers (API_BASE, getJSON, escapeHtml, the
+// nav status pill) live in config.js, loaded before this file.
 
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -32,24 +24,14 @@ function statusTag(status) {
   return `<span class="status-tag status-${status}">${label}</span>`;
 }
 
-async function loadStatus() {
-  const pill = document.getElementById("status-pill");
+async function loadFooterStatus() {
   try {
     const status = await getJSON("/api/status");
     document.getElementById("whitelist-value").textContent =
       status.whitelisted_sources.length ? status.whitelisted_sources.join(", ") : "none (draft-only)";
     document.getElementById("llm-value").textContent = status.llm_provider;
-
-    if (status.dry_run) {
-      pill.textContent = "Dry run — no live actions";
-      pill.className = "pill pill-warn";
-    } else {
-      pill.textContent = "Live";
-      pill.className = "pill pill-ok";
-    }
   } catch (e) {
-    pill.textContent = "Backend unreachable";
-    pill.className = "pill pill-muted";
+    // footer just stays at "—"
   }
 }
 
@@ -124,13 +106,7 @@ async function loadNews() {
   }
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
-
-loadStatus();
+loadFooterStatus();
 loadStats();
 loadApplications();
 loadSkillGaps();

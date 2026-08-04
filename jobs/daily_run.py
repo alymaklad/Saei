@@ -6,17 +6,21 @@ from db import get_session, init_db
 from models import Job, Application, SkillGap
 from agents.search_agent import run_search
 from orchestrator import app as orchestrator_app
-from cv_parser import parse_cv
-
-DEFAULT_CV_PATH = "cv/current_cv.pdf"  # place your CV here (any .pdf or .docx)
+from cv_parser import parse_cv, find_default_cv
 
 
 def _job_exists(session, url: str) -> bool:
     return session.query(Job).filter(Job.url == url).first() is not None
 
 
-def run_daily_search_and_apply(cv_path: str = DEFAULT_CV_PATH, query: str = ""):
+def run_daily_search_and_apply(cv_path: str | None = None, query: str = ""):
     init_db()
+    cv_path = cv_path or find_default_cv("cv")
+    if not cv_path:
+        raise RuntimeError(
+            "No CV found. Upload one via the dashboard's CV page, or place a "
+            "file at cv/current_cv.pdf or cv/current_cv.docx."
+        )
     cv_text = parse_cv(cv_path)
     found = run_search(query=query)
 

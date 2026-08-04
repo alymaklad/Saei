@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Application Agent</title>
+<title>Job Application Agent — Dashboard</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,6 +16,13 @@
     </div>
     <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
   </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink active">Dashboard</a>
+    <a href="settings.html" class="navlink">Settings</a>
+    <a href="cv.html" class="navlink">CV</a>
+    <a href="features.html" class="navlink">Features</a>
+  </nav>
 
   <section class="stats-grid" id="stats-grid">
     <div class="stat-card"><span class="stat-value" id="stat-jobs">&mdash;</span><span class="stat-label">Jobs found</span></div>
@@ -72,6 +79,7 @@
 
 </div>
 
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

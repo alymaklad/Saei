@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Application Agent — Features</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Job Application Agent</h1>
+    </div>
+    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
+  </header>
+
+  <nav class="mainnav">
+    <a href="index.html" class="navlink">Dashboard</a>
+    <a href="settings.html" class="navlink">Settings</a>
+    <a href="cv.html" class="navlink">CV</a>
+    <a href="features.html" class="navlink active">Features</a>
+  </nav>
+
+  <main class="wide-main">
+    <div class="feature-grid">
+
+      <section class="feature-card">
+        <h3>Search</h3>
+        <p>Pulls jobs from Greenhouse and Lever's public APIs, an optional
+        Google Sheets watchlist, and SerpAPI's free tier for Google Jobs.
+        Every job is deduped on URL before anything else happens to it.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>ATS scoring</h3>
+        <p>Combines deterministic keyword overlap (how real ATS filters
+        actually work) with LLM judgment on seniority and domain fit, using
+        whichever provider is set on the <a href="settings.html">Settings</a> page.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>CV rewriting</h3>
+        <p>When the fit score is low, the CV gets reframed around the job
+        description's real requirements — never fabricated. Missing skills
+        are reported separately rather than invented into the CV.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>Whitelist-only auto-submit</h3>
+        <p id="feature-whitelist">Checking current whitelist&hellip;</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>Draft for review</h3>
+        <p>Every board outside the whitelist gets a complete draft — CV,
+        cover letter, target URL — held for your approval instead of being
+        sent automatically.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>Email</h3>
+        <p>Sends application emails through your own Gmail account via OAuth
+        — no per-email cost, nothing routed through a third party.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>Skill gap tracking</h3>
+        <p>Tallies which required skills show up as "missing" most often
+        across recent jobs, surfaced on the <a href="index.html">Dashboard</a>.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>Reports</h3>
+        <p>A daily summary of what happened and a weekly news digest for your
+        field, delivered over a free Telegram bot.</p>
+      </section>
+
+      <section class="feature-card">
+        <h3>Dry run mode</h3>
+        <p id="feature-dryrun">Checking current mode&hellip;</p>
+      </section>
+
+    </div>
+  </main>
+
+</div>
+
+<script src="config.js"></script>
+<script src="features.js"></script>
+</body>
+</html>

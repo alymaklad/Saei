@@ -6,10 +6,13 @@ venv/
 *.egg-info/
 .pytest_cache/
 
-# runtime data — never commit real DB, credentials, or generated CVs
+# runtime data — never commit real DB, credentials, generated CVs, or the
+# user's actual uploaded CV (personal data: name, contact info, history)
 data/*.db
 credentials/*.json
 cv_output/*.docx
+cv/current_cv.*
 !data/.gitkeep
 !credentials/.gitkeep
 !cv_output/.gitkeep
+!cv/.gitkeep

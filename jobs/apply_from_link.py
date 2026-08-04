@@ -5,11 +5,17 @@ from bs4 import BeautifulSoup
 from db import get_session, init_db
 from models import Job
 from orchestrator import app as orchestrator_app
-from cv_parser import parse_cv
+from cv_parser import parse_cv, find_default_cv
 
 
-def apply_from_link(url: str, cv_path: str):
+def apply_from_link(url: str, cv_path: str | None = None):
     init_db()
+    cv_path = cv_path or find_default_cv("cv")
+    if not cv_path:
+        raise RuntimeError(
+            "No CV found. Upload one via the dashboard's CV page, or pass a "
+            "path explicitly."
+        )
     cv_text = parse_cv(cv_path)
 
     resp = requests.get(url, timeout=20)
@@ -47,7 +53,9 @@ def apply_from_link(url: str, cv_path: str):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) < 3:
-        print("Usage: python jobs/apply_from_link.py <job_url> <cv_path>")
+    if len(sys.argv) < 2:
+        print("Usage: python jobs/apply_from_link.py <job_url> [cv_path]")
+        print("(cv_path is optional if a CV was uploaded via the dashboard's CV page)")
     else:
-        print(apply_from_link(sys.argv[1], sys.argv[2]))
+        cv_arg = sys.argv[2] if len(sys.argv) > 2 else None
+        print(apply_from_link(sys.argv[1], cv_arg))

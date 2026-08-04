@@ -24,3 +24,16 @@ def _parse_docx(path: str) -> str:
     from docx import Document
     doc = Document(path)
     return "\n".join(p.text for p in doc.paragraphs)
+
+
+def find_default_cv(directory: str = "cv") -> str | None:
+    """
+    Looks for cv/current_cv.pdf or cv/current_cv.docx -- whichever was most
+    recently uploaded via the CV page (or placed there by hand). Returns None
+    if neither exists.
+    """
+    for ext in (".pdf", ".docx"):
+        candidate = os.path.join(directory, f"current_cv{ext}")
+        if os.path.exists(candidate):
+            return candidate
+    return None

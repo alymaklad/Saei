@@ -71,7 +71,9 @@ To use free LLM scoring, either:
 - Install [Ollama](https://ollama.com), run `ollama pull llama3.1`, leave `LLM_PROVIDER=ollama`, or
 - Get a free [Gemini API key](https://aistudio.google.com/apikey) and set `LLM_PROVIDER=gemini` + `GEMINI_API_KEY`.
 
-Put your CV at `cv/current_cv.pdf` (or `.docx`) before running the daily job.
+Add your CV before running the daily job — either upload it through the
+dashboard's **CV** page (`frontend/cv.html`), or place a file by hand at
+`cv/current_cv.pdf` or `cv/current_cv.docx`.
 
 ## Running it
 
@@ -101,8 +103,9 @@ setup; the shortcut itself is reusable forever. (Edit the `.vbs` file's
 # one-off: search everything configured, score, draft/apply
 python jobs/daily_run.py
 
-# one-off: apply from a single URL you found manually
-python jobs/apply_from_link.py "https://boards.greenhouse.io/acme/jobs/123" cv/current_cv.pdf
+# one-off: apply from a single URL you found manually (cv_path optional if
+# you've already uploaded a CV via the dashboard's CV page)
+python jobs/apply_from_link.py "https://boards.greenhouse.io/acme/jobs/123" [cv_path]
 
 # start the always-on scheduler (daily search 08:00, daily report 20:00, weekly news Mon 09:00)
 python scheduler.py
@@ -136,19 +139,36 @@ This is the one part of the system meant to be verified per employer, not automa
 
 ## Frontend + dashboard API
 
-`api.py` is a thin read-only FastAPI layer over the same SQLite DB the agents
-write to. `frontend/` is a static, dependency-free HTML/CSS/JS dashboard
-(off-white, minimalist) that reads from it — no build step required.
+`api.py` is a FastAPI layer over the same SQLite DB the agents write to, plus
+a couple of endpoints that write local config for a single user. `frontend/`
+is a static, dependency-free HTML/CSS/JS dashboard (off-white, minimalist) —
+no build step required. Four pages, linked from the nav bar on every page:
+
+- **Dashboard** (`index.html`) — stats, applications table, skill gaps, latest news digest.
+- **Settings** (`settings.html`) — choose the LLM provider (Ollama or Gemini)
+  and enter/replace the Gemini API key. Saved to `.env` on the machine running
+  `api.py` (`env_store.py` upserts the specific keys, preserving everything
+  else in the file). Takes effect immediately for `api.py` itself; the
+  scheduler is a separate process and needs a restart to pick up the change —
+  the page says so rather than pretending it's instant everywhere.
+- **CV** (`cv.html`) — shows the currently active CV (filename, parsed
+  preview) and lets you upload a replacement (.pdf/.docx, drag-and-drop or
+  file picker). Saved to `cv/current_cv.<ext>`, which `jobs/daily_run.py` and
+  `jobs/apply_from_link.py` now auto-detect via `cv_parser.find_default_cv()`
+  instead of a hardcoded path.
+- **Features** (`features.html`) — what each part of the system does, with a
+  couple of lines (current whitelist, dry-run state) pulled live from `/api/status`
+  rather than being static marketing copy.
 
 ```bash
 # backend (serves /api/*)
 uvicorn api:app --reload --port 8000
 
-# frontend — just open the file, or serve it
+# frontend — just open index.html, or serve the folder
 python -m http.server 5500 --directory frontend
 ```
 
-Before deploying, edit `frontend/app.js` and change `API_BASE` to wherever
+Before deploying, edit `frontend/config.js` and change `API_BASE` to wherever
 `api.py` ends up running (see [Deployment](#deployment)).
 
 ## Deployment
@@ -192,13 +212,15 @@ agents/                # one module per capability (search, ats, rewrite, apply,
 orchestrator.py        # LangGraph state machine wiring the agents together
 jobs/                  # entry points: daily_run, daily_report, weekly_news, apply_from_link
 scheduler.py            # APScheduler cron triggers -> automatic daily/weekly execution
-api.py                  # read-only FastAPI layer over the SQLite DB, for the frontend
+api.py                  # FastAPI layer: dashboard data + settings + CV upload
+env_store.py             # upserts specific keys in .env, preserving the rest
+cv/                      # current_cv.pdf/.docx lives here (gitignored -- personal data)
 requirements.txt        # pip package list -- single source of truth for versions
 environment.yml         # conda env definition, installs from requirements.txt
 run.bat                 # Windows one-click launcher (venv): API + scheduler + dashboard
 run_conda.bat           # same, but creates/activates the conda env instead
 create_desktop_shortcut.vbs  # one-time: creates a Desktop shortcut to run.bat
-frontend/               # static off-white dashboard (index.html/style.css/app.js), no build step
+frontend/               # off-white dashboard: index/settings/cv/features.html + config.js, no build step
 tests/                  # pytest suite
 deploy/gcp/             # Compute Engine (Always Free e2-micro) deploy scripts + guide
 ```
