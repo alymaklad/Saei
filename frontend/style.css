@@ -109,7 +109,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 560px;
+  /* Was 560px -- cards/forms/tables here are all fluid-width already (no
+     fixed-px inputs), so this was just leaving a wide, wasted gutter on
+     anything bigger than a small laptop screen instead of using the page's
+     actual 1080px budget. */
+  max-width: 900px;
 }
 
 .wide-main { width: 100%; }
