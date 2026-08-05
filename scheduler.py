@@ -21,18 +21,18 @@ scheduler.add_job(run_weekly_news_digest, "cron", day_of_week="mon", hour=9, id=
 # TEMPORARY -- one-time verification run, added on request to prove the
 # automation actually works end-to-end without waiting for the next real
 # 8am/8pm/Monday-9am slot. `soon` is computed fresh each time this process
-# starts (NOT a fixed clock time), so it's always "5 minutes after whichever
+# starts (NOT a fixed clock time), so it's always "1 minute after whichever
 # moment you (re)start the app" -- fires once, then this whole block is
 # inert until the process restarts again. Delete this block once you've
 # confirmed things work; leaving it in means every future restart of the
-# scheduler also fires an extra unscheduled run 5 minutes later (including a
+# scheduler also fires an extra unscheduled run 1 minute later (including a
 # real Telegram send from the report jobs, since DRY_RUN=false).
-soon = datetime.now() + timedelta(minutes=5)
+soon = datetime.now() + timedelta(minutes=1)
 scheduler.add_job(run_daily_search_and_apply, "date", run_date=soon, id="daily_search_and_apply_test_run")
 scheduler.add_job(run_daily_report, "date", run_date=soon, id="daily_report_test_run")
 scheduler.add_job(run_weekly_news_digest, "date", run_date=soon, id="weekly_news_test_run")
 
 if __name__ == "__main__":
     print("Scheduler started. Jobs: daily search+apply @08:00, daily report @20:00, weekly news Mon @09:00")
-    print(f"One-time test run of all three jobs scheduled for {soon.strftime('%H:%M:%S')} (5 min from now).")
+    print(f"One-time test run of all three jobs scheduled for {soon.strftime('%H:%M:%S')} (1 min from now).")
     scheduler.start()
