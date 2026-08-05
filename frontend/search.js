@@ -1,6 +1,12 @@
 // Search tab: position query, job-board site list, and the search-now button.
 
-const SITE_TYPE_LABEL = { greenhouse: "Greenhouse", lever: "Lever", generic: "Generic" };
+const SITE_TYPE_LABEL = {
+  greenhouse: "Greenhouse",
+  lever: "Lever",
+  generic: "Generic",
+  wuzzuf: "Job board",
+  bayt: "Job board",
+};
 
 function fmtDate(iso) {
   if (!iso) return "—";

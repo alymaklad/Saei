@@ -117,13 +117,14 @@
         </table>
       </div>
       <p class="note">
-        Whenever Position (above) is set, Wuzzuf and Bayt.com are searched
-        automatically — no need to add them here. Both were verified to
-        return real results with a plain, unauthenticated request; LinkedIn
-        and Indeed were tested too and block that outright, so they're not
-        included and won't work if you add them manually either. Use this
-        list for specific companies (Greenhouse/Lever boards) or other sites
-        you want searched in addition to the automatic ones. Greenhouse/Lever
+        Wuzzuf and Bayt.com are pre-added below by default (both verified to
+        return real results with a plain, unauthenticated request) — remove
+        either one if you don't want it searched. LinkedIn and Indeed were
+        tested too and block that outright, so they're not included and
+        won't work if you add them manually either. For those two, the
+        search query is rebuilt from Position each run, so they're skipped
+        for a run where Position is blank. Add specific companies
+        (Greenhouse/Lever boards) or any other site here too — Greenhouse/Lever
         URLs are detected automatically and searched via their public APIs,
         same as the <code>.env</code>-configured boards. Any other URL is
         searched with a best-effort scraper — it looks for same-site links

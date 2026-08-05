@@ -6,12 +6,14 @@ Free sources, in priority order:
   2. Lever public API       — no key needed
   3. Google Sheets watchlist — free (Google Cloud service account)
   4. Sites added from the dashboard's Search tab — Greenhouse/Lever URLs reuse
-     the API-backed paths above; anything else falls back to a best-effort
-     generic scrape (see search_generic_site)
-  5. KNOWN_JOB_BOARD_TEMPLATES — verified-scrapable job boards (currently
-     Wuzzuf, Bayt.com) searched automatically from the `position` field, no
-     URL-adding required
-  6. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
+     the API-backed paths above; verified job-board templates (Wuzzuf,
+     Bayt.com -- see KNOWN_JOB_BOARD_TEMPLATES) rebuild their URL from the
+     `position` field each run; anything else falls back to a best-effort
+     generic scrape (see search_generic_site). Wuzzuf/Bayt are pre-added as
+     default rows the first time the app runs (seed_default_search_sites)
+     but are just regular rows after that -- removable from the Search tab
+     like any other site.
+  5. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
 """
 import re
 from datetime import datetime, timedelta, timezone
@@ -251,9 +253,15 @@ def _slugify(text: str) -> str:
 # (Wuzzuf: Egypt, Bayt: Gulf/MENA); LinkedIn and Indeed were tested too and
 # both block unauthenticated requests outright (HTTP 999 / 403), so they're
 # deliberately not included -- adding them here would just silently return
-# nothing. Automatically searched whenever `position` is set, in addition to
-# whatever's in the manually-managed Search tab site list, so a useful search
-# works without the user having to find/paste board URLs themselves.
+# nothing.
+#
+# These double as the seed data for the Search tab's default site list (see
+# seed_default_search_sites() below) -- shown as regular, removable rows
+# rather than a hardcoded always-on injection, so a user who doesn't want
+# Wuzzuf/Bayt searched can just delete them like any other site. A site row
+# whose site_type is one of these keys gets its real per-search URL rebuilt
+# from `position` at search time (see run_search()) instead of using the
+# stored URL directly, since the useful search URL depends on the query.
 #
 # Each entry is a build_url(position) -> str|None callable rather than a
 # plain "?param={query}" template, because sites vary in how (or whether) a
@@ -269,10 +277,19 @@ def _slugify(text: str) -> str:
 KNOWN_JOB_BOARD_TEMPLATES = {
     "wuzzuf": {
         "label": "Wuzzuf",
-        "build_url": lambda position: f"https://wuzzuf.net/search/jobs/?q={quote_plus(position)}",
+        "default_url": "https://wuzzuf.net/search/jobs/",
+        # Guard against a blank position explicitly (unlike a plain f-string
+        # template, this must return None so the dispatcher in run_search()
+        # skips it) -- otherwise ?q= with nothing after it would scrape
+        # Wuzzuf's entire unfiltered listing instead of being skipped, same
+        # as Bayt already does below.
+        "build_url": lambda position: (
+            f"https://wuzzuf.net/search/jobs/?q={quote_plus(position)}" if position.strip() else None
+        ),
     },
     "bayt": {
         "label": "Bayt.com",
+        "default_url": "https://www.bayt.com/en/international/jobs/",
         "build_url": lambda position: (
             f"https://www.bayt.com/en/international/jobs/{_slugify(position)}-jobs/"
             if _slugify(position) else None
@@ -281,17 +298,26 @@ KNOWN_JOB_BOARD_TEMPLATES = {
 }
 
 
-def auto_discovered_sites(position: str) -> list[dict]:
-    """Builds search URLs for KNOWN_JOB_BOARD_TEMPLATES from `position`. No
-    position means no query to search with, so this returns nothing."""
-    if not position:
-        return []
-    sites = []
-    for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items():
-        url = meta["build_url"](position)
-        if url:
-            sites.append({"key": key, "label": meta["label"], "url": url})
-    return sites
+def seed_default_search_sites() -> None:
+    """Populates models.SearchSite with KNOWN_JOB_BOARD_TEMPLATES the very
+    first time the app runs (table completely empty), so the Search tab's
+    site list isn't empty by default and the user can see/remove them like
+    any other site instead of them being an invisible hardcoded behavior.
+    Only fires on a truly empty table -- if the user has since removed a
+    default (or added their own sites), the table is no longer empty, so
+    this never re-adds anything they deliberately deleted."""
+    from db import get_session
+    from models import SearchSite
+    with get_session() as session:
+        if session.query(SearchSite).first() is not None:
+            return
+        for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items():
+            session.add(SearchSite(
+                url=meta["default_url"],
+                site_type=key,
+                identifier=None,
+                label=meta["label"],
+            ))
 
 
 def search_serpapi(query: str) -> list[dict]:
@@ -365,9 +391,10 @@ def run_search(
     """
     Pulls from every configured free source and tags each job with its
     source. `position` (a job title/keyword) is used three ways: as part of
-    the SerpAPI query, as the query for KNOWN_JOB_BOARD_TEMPLATES (Wuzzuf,
-    Bayt.com -- automatically searched whenever position is set, no manual
-    site-adding required), and as a case-insensitive title filter applied to
+    the SerpAPI query, to build the real search URL for any dashboard-added
+    site whose site_type is a KNOWN_JOB_BOARD_TEMPLATES key (Wuzzuf,
+    Bayt.com -- skipped for this run if position is blank, since there's no
+    query to search with), and as a case-insensitive title filter applied to
     every other source (Greenhouse/Lever/watchlist/dashboard-added sites) so
     one field controls relevance everywhere. `seniority` (one of "intern",
     "entry", "mid", "senior", "lead", "manager") works the same way -- also
@@ -417,13 +444,20 @@ def run_search(
                 jobs = _cap(search_lever(site["identifier"]), max_results_per_site)
                 broad += [{"source": "lever", "company_slug": site["identifier"], "site_url": site["url"], **j}
                           for j in jobs]
+            elif site["site_type"] in KNOWN_JOB_BOARD_TEMPLATES:
+                # Wuzzuf/Bayt (or any future template site): the stored URL is
+                # just a display/landing link -- the real, query-filtered
+                # search URL depends on `position` and is rebuilt fresh here.
+                # No position set means no query to build a useful URL from,
+                # so this site is skipped for this run rather than scraping
+                # its unfiltered landing page.
+                built_url = KNOWN_JOB_BOARD_TEMPLATES[site["site_type"]]["build_url"](position)
+                if built_url:
+                    broad += search_generic_site(built_url, position=position, max_candidates=max_results_per_site)
             else:
                 broad += search_generic_site(site["url"], position=position, max_candidates=max_results_per_site)
         except requests.RequestException as exc:
             source_errors.append({"source": site["site_type"], "identifier": site["url"], "error": str(exc)})
-
-    for auto_site in auto_discovered_sites(position):
-        broad += search_generic_site(auto_site["url"], position=position, max_candidates=max_results_per_site)
 
     if position:
         needle = position.lower()

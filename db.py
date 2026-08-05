@@ -20,6 +20,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Local import: avoids a module-load-time cycle (agents.search_agent only
+    # imports db/models inside functions, not at module level, so this is
+    # safe as long as it isn't hoisted to the top of this file).
+    from agents.search_agent import seed_default_search_sites
+    seed_default_search_sites()
 
 
 @contextmanager

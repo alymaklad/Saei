@@ -65,14 +65,18 @@ class EmailLog(Base):
 
 
 class SearchSite(Base):
-    """A user-added website to search for jobs on, beyond the .env-configured
+    """A website to search for jobs on, beyond the .env-configured
     GREENHOUSE_BOARD_TOKENS/LEVER_COMPANY_SLUGS lists. Managed from the Search
-    tab instead of by hand-editing .env."""
+    tab instead of by hand-editing .env. A few verified job boards (currently
+    Wuzzuf, Bayt.com -- see agents.search_agent.KNOWN_JOB_BOARD_TEMPLATES)
+    are seeded here by default the first time the app runs, so the list isn't
+    empty out of the box, but from then on they're ordinary rows the user can
+    delete like anything else added by hand."""
     __tablename__ = "search_sites"
     id = Column(Integer, primary_key=True)
     url = Column(String, unique=True, nullable=False)
-    site_type = Column(String)            # "greenhouse" | "lever" | "generic"
-    identifier = Column(String, nullable=True)  # board token / company slug, None for generic
+    site_type = Column(String)            # "greenhouse" | "lever" | "generic" | a KNOWN_JOB_BOARD_TEMPLATES key
+    identifier = Column(String, nullable=True)  # board token / company slug, None for generic/templated
     label = Column(String, nullable=True)
     date_added = Column(DateTime, default=_utcnow)
 
