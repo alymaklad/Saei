@@ -49,6 +49,16 @@ SEARCH_POSITION_QUERY = os.getenv("SEARCH_POSITION_QUERY", "")
 # "lead", "manager". Same sync behavior as SEARCH_POSITION_QUERY above.
 SEARCH_SENIORITY_LEVEL = os.getenv("SEARCH_SENIORITY_LEVEL", "")
 
+# Tracks whether agents.search_agent.seed_default_search_sites() has already
+# run once. Deliberately NOT re-derived from "is the search_sites table
+# empty" -- a user who already had their own site(s) in there (added before
+# this feature existed, or just from using the app for a while) would make
+# that check false right away, so the defaults would silently never get
+# added. This flag is the actual source of truth; set to true the first time
+# seeding runs and never reset automatically, so removing a default later
+# doesn't bring it back.
+SEARCH_DEFAULT_SITES_SEEDED = _bool("SEARCH_DEFAULT_SITES_SEEDED", False)
+
 # Max raw results kept from each individual source (each Greenhouse board,
 # Lever company, watchlist row, or added website) before filtering. Blank/0 =
 # no limit -- preserves the original "pull everything" behavior. Generic

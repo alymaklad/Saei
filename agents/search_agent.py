@@ -299,25 +299,40 @@ KNOWN_JOB_BOARD_TEMPLATES = {
 
 
 def seed_default_search_sites() -> None:
-    """Populates models.SearchSite with KNOWN_JOB_BOARD_TEMPLATES the very
-    first time the app runs (table completely empty), so the Search tab's
-    site list isn't empty by default and the user can see/remove them like
-    any other site instead of them being an invisible hardcoded behavior.
-    Only fires on a truly empty table -- if the user has since removed a
-    default (or added their own sites), the table is no longer empty, so
-    this never re-adds anything they deliberately deleted."""
+    """Populates models.SearchSite with KNOWN_JOB_BOARD_TEMPLATES the first
+    time the app runs, so the Search tab's site list isn't empty by default
+    and the user can see/remove them like any other site instead of them
+    being an invisible hardcoded behavior.
+
+    Gated on config.SEARCH_DEFAULT_SITES_SEEDED, not on "is the table
+    empty" -- a user who'd already added their own site(s) before this
+    feature existed (or just from using the app for a while) would make an
+    empty-table check false immediately, so the defaults would silently
+    never get added. The persisted flag is the actual source of truth: set
+    to true the first time this runs and never reset automatically, so
+    removing a default later doesn't bring it back.
+    """
+    import config
+    if config.SEARCH_DEFAULT_SITES_SEEDED:
+        return
+
     from db import get_session
     from models import SearchSite
+    import env_store
     with get_session() as session:
-        if session.query(SearchSite).first() is not None:
-            return
+        existing_types = {r[0] for r in session.query(SearchSite.site_type).all()}
         for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items():
+            if key in existing_types:
+                continue  # already present (e.g. re-added by hand) -- don't duplicate
             session.add(SearchSite(
                 url=meta["default_url"],
                 site_type=key,
                 identifier=None,
                 label=meta["label"],
             ))
+
+    env_store.update_env_file({"SEARCH_DEFAULT_SITES_SEEDED": "true"})
+    config.SEARCH_DEFAULT_SITES_SEEDED = True  # keep this process's config in sync too
 
 
 def search_serpapi(query: str) -> list[dict]:
