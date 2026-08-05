@@ -71,6 +71,26 @@ def _cap(jobs: list[dict], limit: int | None) -> list[dict]:
     return jobs
 
 
+def _matches_position(title: str, position: str) -> bool:
+    return not position or position.lower() in (title or "").lower()
+
+
+def _filter_relevant(jobs: list[dict], position: str, seniority: str) -> list[dict]:
+    """Position/seniority title filters, applied to a source's raw job list
+    BEFORE _cap() truncates it -- capping first can silently discard every
+    real match on a large board. Confirmed in practice: Greenhouse returns a
+    company's jobs in a roughly alphabetical-by-title order, so on a
+    545-job board, capping to the first 100 (a completely normal "Max
+    results per site" setting) produced zero "Software Engineer" matches
+    out of 38 real ones, because every single match sat past index 100 --
+    that's what was actually behind a real "search returns nothing" report."""
+    if position:
+        jobs = [j for j in jobs if _matches_position(j.get("title"), position)]
+    if seniority:
+        jobs = [j for j in jobs if _matches_seniority(j.get("title"), seniority)]
+    return jobs
+
+
 # Posted-date extraction: each source exposes "when was this posted"
 # differently, so max-age filtering only works where we can actually find a
 # date. Jobs with no recognizable date are always kept (never excluded) since
@@ -366,17 +386,19 @@ def read_watchlist_sheet() -> list[dict]:
     return sheet.get_all_records()
 
 
-def search_from_watchlist(max_results_per_site: int | None = None) -> list[dict]:
+def search_from_watchlist(
+    max_results_per_site: int | None = None, position: str = "", seniority: str = "",
+) -> list[dict]:
     results = []
     for row in read_watchlist_sheet():
         try:
             board = row.get("greenhouse_board_token")
             slug = row.get("lever_company_slug")
             if board:
-                jobs = _cap(search_greenhouse(board), max_results_per_site)
+                jobs = _cap(_filter_relevant(search_greenhouse(board), position, seniority), max_results_per_site)
                 results += [{"source": "greenhouse", "watchlist_company": row.get("company"), **j} for j in jobs]
             elif slug:
-                jobs = _cap(search_lever(slug), max_results_per_site)
+                jobs = _cap(_filter_relevant(search_lever(slug), position, seniority), max_results_per_site)
                 results += [{"source": "lever", "watchlist_company": row.get("company"), **j} for j in jobs]
             else:
                 query = f"{row.get('role_keyword', '')} {row.get('company', '')}".strip()
@@ -417,11 +439,17 @@ def run_search(
     heuristics (see SENIORITY_KEYWORDS) for every other source. Leave both
     blank to pull everything configured with no filtering.
 
-    `max_results_per_site` caps the raw results kept from each individual
-    source (each Greenhouse board, Lever company, watchlist row, added site)
-    before any filtering -- None/0 means no cap. `max_age_days` drops jobs
-    older than that (Greenhouse/Lever/SerpAPI expose a real posted date;
-    generic scraped sites don't, so they're never excluded by this filter).
+    `max_results_per_site` caps the results kept from each individual source
+    (each Greenhouse board, Lever company, watchlist row, added site) --
+    None/0 means no cap. Applied AFTER the position/seniority filters above
+    for Greenhouse/Lever/watchlist sources, not before: capping first can
+    silently discard every real match on a large board (confirmed in
+    practice -- Greenhouse returns a company's jobs in a roughly
+    alphabetical-by-title order, so a 100-job cap on a 545-job board zeroed
+    out all 38 real "Software Engineer" matches, none of which happened to
+    fall in the first 100 raw results). `max_age_days` drops jobs older than
+    that (Greenhouse/Lever/SerpAPI expose a real posted date; generic
+    scraped sites don't, so they're never excluded by this filter).
 
     Returns (jobs, source_errors). A single dead/misconfigured board (e.g. a
     Lever slug that 404s) is skipped and reported in source_errors instead of
@@ -432,31 +460,31 @@ def run_search(
 
     for board in config.GREENHOUSE_BOARD_TOKENS:
         try:
-            jobs = _cap(search_greenhouse(board), max_results_per_site)
+            jobs = _cap(_filter_relevant(search_greenhouse(board), position, seniority), max_results_per_site)
             broad += [{"source": "greenhouse", "board": board, **j} for j in jobs]
         except requests.RequestException as exc:
             source_errors.append({"source": "greenhouse", "identifier": board, "error": str(exc)})
 
     for company in config.LEVER_COMPANY_SLUGS:
         try:
-            jobs = _cap(search_lever(company), max_results_per_site)
+            jobs = _cap(_filter_relevant(search_lever(company), position, seniority), max_results_per_site)
             broad += [{"source": "lever", "company_slug": company, **j} for j in jobs]
         except requests.RequestException as exc:
             source_errors.append({"source": "lever", "identifier": company, "error": str(exc)})
 
     try:
-        broad += search_from_watchlist(max_results_per_site=max_results_per_site)
+        broad += search_from_watchlist(max_results_per_site=max_results_per_site, position=position, seniority=seniority)
     except Exception as exc:  # noqa: BLE001 -- e.g. bad service account creds
         source_errors.append({"source": "watchlist", "identifier": None, "error": str(exc)})
 
     for site in get_configured_sites():
         try:
             if site["site_type"] == "greenhouse":
-                jobs = _cap(search_greenhouse(site["identifier"]), max_results_per_site)
+                jobs = _cap(_filter_relevant(search_greenhouse(site["identifier"]), position, seniority), max_results_per_site)
                 broad += [{"source": "greenhouse", "board": site["identifier"], "site_url": site["url"], **j}
                           for j in jobs]
             elif site["site_type"] == "lever":
-                jobs = _cap(search_lever(site["identifier"]), max_results_per_site)
+                jobs = _cap(_filter_relevant(search_lever(site["identifier"]), position, seniority), max_results_per_site)
                 broad += [{"source": "lever", "company_slug": site["identifier"], "site_url": site["url"], **j}
                           for j in jobs]
             elif site["site_type"] in KNOWN_JOB_BOARD_TEMPLATES:
