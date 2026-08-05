@@ -99,6 +99,35 @@ def _looks_like_bullet(line: str) -> bool:
     return bool(re.match(r"^[-*•–]\s+", line.strip()))
 
 
+# reportlab's base14 Helvetica only supports WinAnsiEncoding. LLMs routinely
+# write "typographically correct" Unicode punctuation instead of plain ASCII
+# (e.g. U+2010 HYPHEN for compound words like "machine-learning"), and a few
+# of those codepoints aren't in WinAnsi. Confirmed by direct reproduction --
+# building a one-line test PDF with each character and checking which font
+# reportlab actually used per-glyph via pdfplumber -- that U+2010/2011/2012
+# (hyphen variants) and U+2212 (minus sign) silently fall back to a
+# ZapfDingbats/Symbol glyph at that character's byte position instead of
+# erroring, which renders as a solid black square: exactly the artifact seen
+# in real tailored-CV output. En/em dash, curly quotes, ellipsis, and NBSP
+# were tested too and render fine in Helvetica, but are included below anyway
+# for consistency/defense -- normalizing them costs nothing and protects
+# against the same class of bug if the font ever changes.
+_PDF_UNSAFE_PUNCTUATION = {
+    "‐": "-", "‑": "-", "‒": "-",  # hyphen, non-breaking hyphen, figure dash
+    "−": "-",                                 # minus sign
+    "–": "-", "—": "-",                  # en dash, em dash -- safe in Helvetica, normalized anyway
+    "‘": "'", "’": "'",                   # curly single quotes
+    "“": '"', "”": '"',                   # curly double quotes
+    "…": "...",                                # ellipsis
+    " ": " ",                                  # non-breaking space
+}
+_PDF_UNSAFE_PUNCTUATION_RE = re.compile("|".join(re.escape(c) for c in _PDF_UNSAFE_PUNCTUATION))
+
+
+def _sanitize_for_pdf_font(text: str) -> str:
+    return _PDF_UNSAFE_PUNCTUATION_RE.sub(lambda m: _PDF_UNSAFE_PUNCTUATION[m.group(0)], text)
+
+
 # Accent color sampled directly from the uploaded CV (cv/current_cv.pdf) --
 # its section-divider rules and header text use this exact navy, extracted
 # via pdfplumber (non_stroking_color (0.122, 0.227, 0.373) -> this hex).
@@ -128,6 +157,8 @@ def save_cv_as_pdf(cv_text: str, output_path: str):
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    cv_text = _sanitize_for_pdf_font(cv_text)
 
     accent = HexColor(CV_ACCENT_COLOR)
     muted = HexColor("#555555")
