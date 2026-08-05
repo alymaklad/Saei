@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/assets/logo.png" alt="Job Application Agent logo" width="140">
+</p>
+
 # Job Application Agent
 
 Autonomous job-search & application agent. Searches for jobs, scores them against

@@ -48,11 +48,11 @@ body {
 }
 
 .brand-mark {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: block;
+  object-fit: contain;
 }
 
 .brand h1 {
