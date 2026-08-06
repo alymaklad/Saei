@@ -2,6 +2,8 @@
 import json
 from datetime import datetime, timezone
 
+from sqlalchemy.exc import IntegrityError
+
 import config
 from db import get_session, init_db
 from models import Job, Application, SkillGap
@@ -14,46 +16,103 @@ def _job_exists(session, url: str) -> bool:
     return session.query(Job).filter(Job.url == url).first() is not None
 
 
-def _process_one_job(session, raw_job: dict, cv_text: str) -> dict:
+def _insert_job_row(raw_job: dict) -> tuple[int, dict] | None:
     """
-    Everything for a single job, wrapped in a SAVEPOINT by the caller so that
-    one job's failure (a flaky LLM call, a malformed job dict, whatever)
-    can't roll back every other job already processed in this batch.
+    Short, standalone transaction: dedupe-check + insert the Job row,
+    commit, done. Deliberately kept to a single INSERT -- see
+    run_daily_search_and_apply's docstring for why this must NOT share a
+    transaction with the orchestrator call below. Returns None if the URL
+    already exists (nothing to do) or lost a race to another process
+    inserting the same URL concurrently (Job.url's unique constraint raises,
+    caught here the same as any other "someone already has this one").
     """
     url = raw_job.get("url") or raw_job.get("hostedUrl") or raw_job.get("absolute_url")
+    if not url:
+        return None
+    try:
+        with get_session() as session:
+            if _job_exists(session, url):
+                return None
+            job_row = Job(
+                url=url,
+                title=raw_job.get("title", ""),
+                company=raw_job.get("company") or raw_job.get("watchlist_company", ""),
+                source_site=raw_job.get("source", "unknown"),
+                description=raw_job.get("description") or raw_job.get("content", ""),
+            )
+            session.add(job_row)
+            session.flush()  # get job_row.id before returning
+            return job_row.id, {
+                "title": job_row.title,
+                "company": job_row.company,
+                "description": job_row.description,
+            }
+    except IntegrityError:
+        return None  # another process inserted this exact URL first
 
-    job_row = Job(
-        url=url,
-        title=raw_job.get("title", ""),
-        company=raw_job.get("company") or raw_job.get("watchlist_company", ""),
-        source_site=raw_job.get("source", "unknown"),
-        description=raw_job.get("description") or raw_job.get("content", ""),
-    )
-    session.add(job_row)
-    session.flush()  # get job_row.id before the orchestrator call
 
-    raw_job["id"] = job_row.id
-    raw_job["url"] = url
-    raw_job.setdefault("description", job_row.description)
+def _delete_job_row(job_id: int) -> None:
+    """
+    Removes a Job row that _insert_job_row() just committed, when the
+    orchestrator subsequently raises -- so the URL is free to be retried on
+    the next run instead of permanently skipped by the dedupe check. This is
+    what restores the "a failed job leaves no trace" guarantee the old
+    single-SAVEPOINT-per-job design gave for free, now that the Job insert
+    and the Application insert are two separate short transactions instead
+    of one long one wrapping both.
+    """
+    with get_session() as session:
+        session.query(Job).filter(Job.id == job_id).delete()
 
-    result = orchestrator_app.invoke({"job": raw_job, "cv_text": cv_text})
 
-    app_row = Application(
-        job_id=job_row.id,
-        ats_score=result.get("ats_result", {}).get("score") if result.get("ats_result") else None,
-        cv_version_path=result.get("cv_path"),
-        status=result.get("status", "unknown"),
-        date_applied=datetime.now(timezone.utc) if result.get("status") == "auto_submitted" else None,
-    )
-    session.add(app_row)
+def _finalize_job(job_id: int, job_title: str, job_company: str, result: dict) -> dict:
+    """Second short transaction: writes Application (+ SkillGap, if the
+    scoring step surfaced missing skills) for a job whose orchestrator run
+    already completed successfully."""
+    with get_session() as session:
+        app_row = Application(
+            job_id=job_id,
+            ats_score=result.get("ats_result", {}).get("score") if result.get("ats_result") else None,
+            cv_version_path=result.get("cv_path"),
+            status=result.get("status", "unknown"),
+            date_applied=datetime.now(timezone.utc) if result.get("status") == "auto_submitted" else None,
+        )
+        session.add(app_row)
 
-    if result.get("ats_result", {}).get("missing_skills"):
-        session.add(SkillGap(
-            job_id=job_row.id,
-            missing_skills=json.dumps(result["ats_result"]["missing_skills"]),
-        ))
+        if result.get("ats_result", {}).get("missing_skills"):
+            session.add(SkillGap(
+                job_id=job_id,
+                missing_skills=json.dumps(result["ats_result"]["missing_skills"]),
+            ))
 
-    return {"title": job_row.title, "company": job_row.company, "status": app_row.status}
+        status = app_row.status
+
+    return {"title": job_title, "company": job_company, "status": status}
+
+
+def _process_one_job(raw_job: dict, cv_text: str) -> dict | None:
+    """
+    Full per-job flow, split into three phases -- insert Job (short
+    transaction), run the orchestrator (no open transaction at all), write
+    Application/SkillGap (short transaction) -- instead of one transaction
+    spanning all three. See run_daily_search_and_apply's docstring for why.
+    Returns None if there was nothing new to process for this job.
+    """
+    inserted = _insert_job_row(raw_job)
+    if inserted is None:
+        return None
+    job_id, job_fields = inserted
+
+    raw_job["id"] = job_id
+    raw_job.setdefault("description", job_fields["description"])
+
+    try:
+        result = orchestrator_app.invoke({"job": raw_job, "cv_text": cv_text})
+    except Exception:
+        _delete_job_row(job_id)  # keep this URL retry-able on the next run
+        raise
+
+    return _finalize_job(job_id, job_fields["title"], job_fields["company"], result)
 
 
 def run_daily_search_and_apply(
@@ -69,6 +128,20 @@ def run_daily_search_and_apply(
     when not explicitly passed, so the 8am scheduler run and any CLI
     invocation automatically stay in sync with whatever's saved -- only pass
     them explicitly to override for a single run.
+
+    Each job is written to the database in short, independent transactions
+    (see _process_one_job) rather than one transaction covering the whole
+    batch. This matters because SQLite only allows one writer at a time even
+    in WAL mode (see db.py): holding a single transaction open across every
+    job's orchestrator call -- which is several LLM round-trips, easily
+    seconds per job -- meant a batch of dozens of jobs could hold the write
+    lock for minutes. Any other process trying to write during that window
+    (the scheduler's own automatic run overlapping a manual "Search now"
+    click, for example) would blow through even a generous busy_timeout and
+    fail outright with "database is locked" -- a real failure seen in
+    production. Keeping each transaction down to a single row write means
+    the lock is only ever held for milliseconds, so genuine overlap between
+    two runs just makes one of them wait briefly instead of erroring.
     """
     init_db()
     cv_path = cv_path or find_default_cv("cv")
@@ -91,22 +164,20 @@ def run_daily_search_and_apply(
 
     processed = []
     errors = []
-    with get_session() as session:
-        for raw_job in found:
-            url = raw_job.get("url") or raw_job.get("hostedUrl") or raw_job.get("absolute_url")
-            if not url or _job_exists(session, url):
-                continue  # idempotent: never process the same job twice
-
-            try:
-                with session.begin_nested():  # per-job SAVEPOINT
-                    outcome = _process_one_job(session, raw_job, cv_text)
+    for raw_job in found:
+        url = raw_job.get("url") or raw_job.get("hostedUrl") or raw_job.get("absolute_url")
+        if not url:
+            continue
+        try:
+            outcome = _process_one_job(raw_job, cv_text)
+            if outcome is not None:  # None -- already existed, nothing new to record
                 processed.append(outcome)
-            except Exception as exc:  # noqa: BLE001 -- one bad job shouldn't sink the batch
-                errors.append({
-                    "title": raw_job.get("title", ""),
-                    "url": url,
-                    "error": str(exc),
-                })
+        except Exception as exc:  # noqa: BLE001 -- one bad job shouldn't sink the batch
+            errors.append({
+                "title": raw_job.get("title", ""),
+                "url": url,
+                "error": str(exc),
+            })
 
     return {"processed": processed, "errors": errors, "found": len(found), "source_errors": source_errors}
 
