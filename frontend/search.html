@@ -75,9 +75,12 @@
       <p class="note">
         Position/seniority are used as the search query for Google Jobs
         (needs <code>SERPAPI_KEY</code>), and as a title filter applied to
-        every Greenhouse/Lever/watchlist/site result -- seniority via keyword
-        matching (e.g. "senior", "staff", "junior"), so it's a heuristic, not
-        exact. Max time since posted only applies where a real posted date is
+        every Greenhouse/Lever/watchlist/site result -- Position matches if a
+        title contains every word you typed, in any order (so "AI Engineer"
+        also matches "AI Software Engineer" or "Gen AI Engineer", not just
+        that exact phrase), and seniority via keyword matching (e.g.
+        "senior", "staff", "junior") -- so both are heuristics, not exact.
+        Max time since posted only applies where a real posted date is
         available (Greenhouse, Lever, Google Jobs) -- sites searched with the
         best-effort scraper below have no reliable date, so they're never
         excluded by this filter. Max results per site caps how many raw

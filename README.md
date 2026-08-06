@@ -176,8 +176,13 @@ nav bar on every page:
   looks for, in three parts:
   - **Position** — a job title/keyword, saved to `.env`
     (`SEARCH_POSITION_QUERY`). Used as part of the SerpAPI/Google Jobs query,
-    and as a case-insensitive title filter applied to every other source
-    (Greenhouse, Lever, watchlist, added sites). Leave blank to pull
+    and as a word-based title filter applied to every other source
+    (Greenhouse, Lever, RemoteOK, We Work Remotely, watchlist, added sites):
+    a title matches if it contains every significant word from Position, in
+    any order -- so "AI Engineer" matches "AI Software Engineer", "AI/ML
+    Software Engineer", "Gen AI Engineer", and "Gen AI/Agentic AI Engineer"
+    alike, not just titles containing that exact phrase
+    (`agents/search_agent.py::_matches_position`). Leave blank to pull
     everything configured with no filter.
   - **Seniority** — a dropdown (Intern, Entry Level, Mid Level, Senior, Lead,
     Manager), saved to `.env` (`SEARCH_SENIORITY_LEVEL`). Also folded into

@@ -81,8 +81,32 @@ def _cap(jobs: list[dict], limit: int | None) -> list[dict]:
     return jobs
 
 
+# Position matching is token-based rather than a literal substring check,
+# because job titles routinely phrase the same role differently than the
+# query without ever containing it as one contiguous phrase -- e.g.
+# searching "AI Engineer" should match "AI Software Engineer", "AI/ML
+# Software Engineer", "Gen AI Engineer", and "Gen AI/Agentic AI Engineer"
+# alike, none of which contain the literal substring "ai engineer" (the
+# words "AI" and "Engineer" are separated by other words, or in a different
+# order). A title matches if it contains every significant word from the
+# query, in any order and not necessarily adjacent -- a small, deliberately
+# simple heuristic (same spirit as SENIORITY_KEYWORDS below) rather than a
+# synonym dictionary, since decomposing into words already covers the
+# common "role phrased differently" cases above for free.
+_POSITION_STOPWORDS = {"a", "an", "and", "or", "the", "of", "in", "for", "with", "to"}
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _position_tokens(text: str) -> set[str]:
+    words = _WORD_RE.findall((text or "").lower())
+    return {w for w in words if w not in _POSITION_STOPWORDS}
+
+
 def _matches_position(title: str, position: str) -> bool:
-    return not position or position.lower() in (title or "").lower()
+    query_tokens = _position_tokens(position)
+    if not query_tokens:
+        return True  # blank position, or pure punctuation -- no filter
+    return query_tokens.issubset(_position_tokens(title))
 
 
 def _filter_relevant(jobs: list[dict], position: str, seniority: str) -> list[dict]:
@@ -227,8 +251,8 @@ def search_remoteok(position: str = "") -> list[dict]:
     RemoteOK's free public JSON feed (https://remoteok.com/api) -- no key,
     no auth required, and explicitly published for this kind of use (linked
     from RemoteOK's own nav as "JSON feed"). Returns RemoteOK's current
-    developer-jobs feed; `position` narrows it with a case-insensitive
-    substring match against the job title, since this endpoint doesn't
+    developer-jobs feed; `position` narrows it via `_matches_position`
+    (word-based, not a literal phrase match), since this endpoint doesn't
     expose a real query/search parameter (only tag filtering, and there's
     no reliable way to map arbitrary free-text position to its tag
     taxonomy).
@@ -248,7 +272,6 @@ def search_remoteok(position: str = "") -> list[dict]:
     if not isinstance(data, list):
         return []
 
-    needle = position.lower().strip()
     jobs = []
     for entry in data:
         if not isinstance(entry, dict):
@@ -256,7 +279,7 @@ def search_remoteok(position: str = "") -> list[dict]:
         title = entry.get("position")
         if not entry.get("id") or not title:
             continue  # the leading legal-notice object, or a malformed row
-        if needle and needle not in title.lower():
+        if not _matches_position(title, position):
             continue
         jobs.append({
             "title": title,
@@ -347,7 +370,7 @@ def search_generic_site(url: str, position: str = "", max_candidates: int | None
         candidates.append((absolute, text))
 
     if position:
-        narrowed = [c for c in candidates if position.lower() in c[1].lower()]
+        narrowed = [c for c in candidates if _matches_position(c[1], position)]
         if narrowed:  # only narrow if it doesn't wipe out every candidate
             candidates = narrowed
 
@@ -592,9 +615,10 @@ def run_search(
     the SerpAPI query, to build the real search URL for any dashboard-added
     site whose site_type is a KNOWN_JOB_BOARD_TEMPLATES key (Wuzzuf,
     Bayt.com -- skipped for this run if position is blank, since there's no
-    query to search with), and as a case-insensitive title filter applied to
-    every other source (Greenhouse/Lever/watchlist/dashboard-added sites) so
-    one field controls relevance everywhere. `seniority` (one of "intern",
+    query to search with), and as a word-based title filter (see
+    _matches_position) applied to every other source (Greenhouse/Lever/
+    watchlist/dashboard-added sites) so one field controls relevance
+    everywhere. `seniority` (one of "intern",
     "entry", "mid", "senior", "lead", "manager") works the same way -- also
     folded into the SerpAPI query, and matched against titles via keyword
     heuristics (see SENIORITY_KEYWORDS) for every other source. Leave both
@@ -678,8 +702,7 @@ def run_search(
             source_errors.append({"source": site["site_type"], "identifier": site["url"], "error": str(exc)})
 
     if position:
-        needle = position.lower()
-        broad = [j for j in broad if needle in (j.get("title") or "").lower()]
+        broad = [j for j in broad if _matches_position(j.get("title"), position)]
 
     if seniority:
         broad = [j for j in broad if _matches_seniority(j.get("title"), seniority)]

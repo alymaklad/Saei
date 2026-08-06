@@ -236,8 +236,7 @@ source, and tag each with which source it came from (used later by
    legal/attribution notice rather than a job, filtered out naturally by a
    `job.get("id") and job.get("position")` guard rather than a hardcoded
    "skip index 0". The endpoint has no real search parameter, so `position`
-   narrows results with a case-insensitive substring match on the title
-   client-side.
+   narrows results client-side via `_matches_position` (see below).
 4. **We Work Remotely** (`search_weworkremotely()`) — WWR publishes each job
    category as a plain RSS 2.0 feed (`weworkremotely.com/categories/
    remote-programming-jobs.rss` by default), parsed with the stdlib
@@ -334,11 +333,18 @@ don't exist yet, is already seeded."
 **Filtering, applied in this order** (order matters — see the code comment
 on `_filter_relevant`):
 
-1. `_filter_relevant()` — position (case-insensitive substring match on
-   title) and seniority (`SENIORITY_KEYWORDS` heuristics — e.g. "senior" /
-   "sr." for Senior, "intern" for Intern; "mid" has no positive keyword
-   list, it matches titles that hit *none* of the other levels' keywords),
-   applied to each source's **raw, uncapped** results.
+1. `_filter_relevant()` — position and seniority
+   (`SENIORITY_KEYWORDS` heuristics — e.g. "senior" / "sr." for Senior,
+   "intern" for Intern; "mid" has no positive keyword list, it matches
+   titles that hit *none* of the other levels' keywords), applied to each
+   source's **raw, uncapped** results. Position matching (`_matches_position`)
+   is word-based rather than a literal phrase match: a title matches if it
+   contains every significant word from the query, in any order —
+   searching "AI Engineer" (query words `{"ai", "engineer"}`) matches "AI
+   Software Engineer", "AI/ML Software Engineer", "Gen AI Engineer", and
+   "Gen AI/Agentic AI Engineer" alike, none of which contain "ai engineer"
+   as one contiguous phrase. This replaced a literal substring check that
+   silently missed exactly these cases.
 2. `_cap()` — truncates to `max_results_per_site`, applied **after** step 1.
    This ordering was a deliberately fixed bug: capping before filtering on a
    545-job Greenhouse board (returned roughly alphabetically by title) once
