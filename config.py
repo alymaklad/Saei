@@ -27,6 +27,31 @@ def _int_or_none(name: str) -> int | None:
         return None
 
 
+def _seeded_template_keys(name: str) -> set[str]:
+    """
+    Which agents.search_agent.KNOWN_JOB_BOARD_TEMPLATES keys have already
+    been seeded into the search_sites table. Stored as a comma-separated
+    list of keys (e.g. "bayt,wuzzuf") rather than a plain bool, so that
+    adding a NEW template later (e.g. adding "remoteok" to the dict) still
+    gets seeded on the next run for existing installs, without silently
+    re-adding a template the user deliberately removed.
+
+    Migrates the old boolean format transparently: this flag used to be a
+    plain true/false before per-template tracking existed, back when
+    KNOWN_JOB_BOARD_TEMPLATES only had "wuzzuf" and "bayt" -- so a legacy
+    "true" value means exactly {"wuzzuf", "bayt"} were seeded, not "every
+    template that will ever exist."
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return set()
+    if raw.lower() in ("true", "1", "yes", "on"):
+        return {"wuzzuf", "bayt"}
+    if raw.lower() in ("false", "0", "no", "off"):
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
 # LLM
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
@@ -49,15 +74,11 @@ SEARCH_POSITION_QUERY = os.getenv("SEARCH_POSITION_QUERY", "")
 # "lead", "manager". Same sync behavior as SEARCH_POSITION_QUERY above.
 SEARCH_SENIORITY_LEVEL = os.getenv("SEARCH_SENIORITY_LEVEL", "")
 
-# Tracks whether agents.search_agent.seed_default_search_sites() has already
-# run once. Deliberately NOT re-derived from "is the search_sites table
-# empty" -- a user who already had their own site(s) in there (added before
-# this feature existed, or just from using the app for a while) would make
-# that check false right away, so the defaults would silently never get
-# added. This flag is the actual source of truth; set to true the first time
-# seeding runs and never reset automatically, so removing a default later
-# doesn't bring it back.
-SEARCH_DEFAULT_SITES_SEEDED = _bool("SEARCH_DEFAULT_SITES_SEEDED", False)
+# Tracks which agents.search_agent.KNOWN_JOB_BOARD_TEMPLATES keys have
+# already been seeded into search_sites, so seed_default_search_sites()
+# knows what's left to add without re-adding anything the user removed by
+# hand. See _seeded_template_keys() above for the legacy-bool migration.
+SEARCH_DEFAULT_SITES_SEEDED = _seeded_template_keys("SEARCH_DEFAULT_SITES_SEEDED")
 
 # Max raw results kept from each individual source (each Greenhouse board,
 # Lever company, watchlist row, or added website) before filtering. Blank/0 =

@@ -9,7 +9,9 @@ your CV, tailors your CV when the fit is low, auto-applies only on boards you've
 explicitly whitelisted, drafts applications everywhere else for your approval,
 tracks skill gaps, and sends daily/weekly reports.
 
-Built entirely on free tools — see [Tech stack](#tech-stack) below.
+Built entirely on free tools — see [Tech stack](#tech-stack) below. For a
+file-by-file technical walkthrough of how `agents/` and `jobs/` actually
+work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Design principles
 
@@ -196,19 +198,31 @@ nav bar on every page:
     row, or added site *before* any filtering -- useful for a large board
     (some return 500+ jobs) or to keep the generic scraper's per-page
     fetching polite. Defaults to no limit, matching the original behavior.
-  - **Default job boards** — Wuzzuf and Bayt.com are pre-added to the Job
-    boards list below the first time the app ever runs (`agents/search_agent.py::
-    KNOWN_JOB_BOARD_TEMPLATES` + `seed_default_search_sites`, currently those
-    two). Both were confirmed server-rendered and scrapable with a plain
-    unauthenticated request before being added; LinkedIn and Indeed were
-    tested the same way and both block unauthenticated requests outright
-    (LinkedIn returns its anti-bot HTTP 999, Indeed a 403), so they're
-    deliberately excluded -- adding either manually to the list won't work
-    either. Unlike a normal added site, their search URL is rebuilt from
-    Position each run instead of being fixed (skipped for a run where
-    Position is blank) -- but otherwise they're ordinary rows: remove either
-    one from the Search tab if you don't want it searched, same as any site
-    you add yourself.
+  - **Default job boards** — Wuzzuf, Bayt.com, SimplyHired, Wellfound, and
+    GulfTalent are pre-added to the Job boards list below the first time the
+    app ever runs (`agents/search_agent.py::KNOWN_JOB_BOARD_TEMPLATES` +
+    `seed_default_search_sites`). Each was confirmed server-rendered and
+    scrapable with a plain unauthenticated request before being added;
+    LinkedIn, Indeed, and NaukriGulf were tested the same way and all block
+    unauthenticated requests or require JavaScript (LinkedIn's anti-bot HTTP
+    999, Indeed's 403, NaukriGulf's JS-only shell), so they're deliberately
+    excluded -- adding any of them manually to the list won't work either.
+    Unlike a normal added site, each template's search URL is rebuilt from
+    Position each run instead of being fixed (Wuzzuf/SimplyHired/Wellfound
+    skip the run entirely if Position is blank, since there's no query to
+    search with; GulfTalent's own query parameter doesn't actually filter
+    results server-side, so it always points at its Software category page
+    instead and relies on the position-filter applied to every source's
+    combined results) -- but otherwise they're ordinary rows: remove any of
+    them from the Search tab if you don't want them searched, same as any
+    site you add yourself.
+  - **Always-on structured sources** — RemoteOK (`agents/search_agent.py::
+    search_remoteok`) and We Work Remotely (`search_weworkremotely`) are
+    queried every run via their own free public JSON/RSS feeds, the same way
+    Greenhouse/Lever are, rather than through the generic HTML scraper.
+    They don't appear as rows on the Search tab (no per-user config needed)
+    and can't be removed from there -- if you don't want them searched,
+    that's currently a code change, not a dashboard toggle.
   - **Job boards** — add any *additional* website URL (a specific company's
     board, or another site not pre-added above). Greenhouse/Lever URLs
     are detected automatically and searched via their public APIs, same as
@@ -305,6 +319,7 @@ cv_parser.py          # PDF/docx -> text
 agents/                # one module per capability (search, ats, rewrite, apply, email, reporter, news, skill_gap)
 orchestrator.py        # LangGraph state machine wiring the agents together
 jobs/                  # entry points: daily_run, daily_report, weekly_news, apply_from_link
+ARCHITECTURE.md         # technical deep-dive: how every agents/ + jobs/ file works, end to end
 scheduler.py            # APScheduler cron triggers -> automatic daily/weekly execution
 api.py                  # FastAPI layer: dashboard data + settings + CV upload + email/reports
 env_store.py             # upserts specific keys in .env, preserving the rest

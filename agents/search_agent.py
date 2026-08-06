@@ -4,19 +4,29 @@ Search Agent.
 Free sources, in priority order:
   1. Greenhouse public API  — no key needed
   2. Lever public API       — no key needed
-  3. Google Sheets watchlist — free (Google Cloud service account)
-  4. Sites added from the dashboard's Search tab — Greenhouse/Lever URLs reuse
+  3. RemoteOK JSON feed     — no key needed, official public API (see search_remoteok)
+  4. We Work Remotely RSS   — no key needed, official public per-category feed (see search_weworkremotely)
+  5. Google Sheets watchlist — free (Google Cloud service account)
+  6. Sites added from the dashboard's Search tab — Greenhouse/Lever URLs reuse
      the API-backed paths above; verified job-board templates (Wuzzuf,
-     Bayt.com -- see KNOWN_JOB_BOARD_TEMPLATES) rebuild their URL from the
-     `position` field each run; anything else falls back to a best-effort
-     generic scrape (see search_generic_site). Wuzzuf/Bayt are pre-added as
-     default rows the first time the app runs (seed_default_search_sites)
-     but are just regular rows after that -- removable from the Search tab
-     like any other site.
-  5. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
+     Bayt.com, GulfTalent, SimplyHired, Wellfound -- see
+     KNOWN_JOB_BOARD_TEMPLATES) rebuild their URL from the `position` field
+     each run; anything else falls back to a best-effort generic scrape (see
+     search_generic_site). All five templates are pre-added as default rows
+     the first time the app runs (seed_default_search_sites) but are just
+     regular rows after that -- removable from the Search tab like any other
+     site.
+  7. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
+
+RemoteOK and We Work Remotely are always-on structured sources (like
+Greenhouse/Lever) rather than SearchSite rows -- they need no per-user
+config and aren't Greenhouse/Lever, so they can never be whitelisted for
+auto-submit (see WHITELISTABLE_SOURCES), same as google_jobs/generic.
 """
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus, urljoin, urlparse
 
 import requests
@@ -140,6 +150,22 @@ def _extract_posted_at(job: dict) -> datetime | None:
         except (ValueError, TypeError, OSError, OverflowError):
             pass
 
+    # RemoteOK (ISO 8601, e.g. "2024-06-01T12:00:00+00:00") and We Work
+    # Remotely (RFC 822 pubDate, e.g. "Mon, 01 Jan 2024 00:00:00 +0000") both
+    # normalize their post date into this same "date" key -- see
+    # search_remoteok()/search_weworkremotely() -- so both formats are tried
+    # here rather than needing a source-specific branch above.
+    date_value = job.get("date")
+    if date_value:
+        try:
+            return datetime.fromisoformat(date_value)
+        except (ValueError, TypeError):
+            pass
+        try:
+            return parsedate_to_datetime(date_value)
+        except (ValueError, TypeError):
+            pass
+
     # SerpAPI / Google Jobs: relative text, e.g. "3 days ago".
     posted_at = (job.get("detected_extensions") or {}).get("posted_at")
     if posted_at:
@@ -194,6 +220,90 @@ def search_lever(company: str) -> list[dict]:
     resp = requests.get(url, timeout=20)
     resp.raise_for_status()
     return resp.json()
+
+
+def search_remoteok(position: str = "") -> list[dict]:
+    """
+    RemoteOK's free public JSON feed (https://remoteok.com/api) -- no key,
+    no auth required, and explicitly published for this kind of use (linked
+    from RemoteOK's own nav as "JSON feed"). Returns RemoteOK's current
+    developer-jobs feed; `position` narrows it with a case-insensitive
+    substring match against the job title, since this endpoint doesn't
+    expose a real query/search parameter (only tag filtering, and there's
+    no reliable way to map arbitrary free-text position to its tag
+    taxonomy).
+
+    The response's first element is RemoteOK's own legal/attribution
+    notice, not a job -- it has no "id"/"position" field, so the
+    `job.get("id") and job.get("position")` guard below excludes it
+    naturally rather than needing a hardcoded "skip index 0".
+    """
+    resp = requests.get(
+        "https://remoteok.com/api",
+        timeout=20,
+        headers={**GENERIC_SITE_HEADERS, "Accept": "application/json"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, list):
+        return []
+
+    needle = position.lower().strip()
+    jobs = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        title = entry.get("position")
+        if not entry.get("id") or not title:
+            continue  # the leading legal-notice object, or a malformed row
+        if needle and needle not in title.lower():
+            continue
+        jobs.append({
+            "title": title,
+            "company": entry.get("company", ""),
+            "url": entry.get("url") or f"https://remoteok.com/remote-jobs/{entry['id']}",
+            "description": entry.get("description", ""),
+            "date": entry.get("date"),  # ISO 8601 -- see _extract_posted_at
+        })
+    return jobs
+
+
+def search_weworkremotely(category: str = "remote-programming-jobs") -> list[dict]:
+    """
+    We Work Remotely publishes each job category as a plain RSS 2.0 feed
+    (e.g. /categories/remote-programming-jobs.rss) -- no key, no auth,
+    structured XML rather than an HTML page to scrape. `category` defaults
+    to programming jobs since that's the relevant category for this app;
+    WWR's other categories (design, devops, marketing, etc.) follow the
+    same URL pattern if ever needed.
+
+    WWR titles its listings "Company: Job Title" -- split on the first ": "
+    below so title/company come back as separate fields like every other
+    source here, falling back to the whole string as the title (blank
+    company) if a listing doesn't follow that convention.
+    """
+    url = f"https://weworkremotely.com/categories/{category}.rss"
+    resp = requests.get(url, timeout=20, headers=GENERIC_SITE_HEADERS)
+    resp.raise_for_status()
+
+    root = ET.fromstring(resp.content)
+    jobs = []
+    for item in root.iter("item"):
+        raw_title = (item.findtext("title") or "").strip()
+        if not raw_title:
+            continue
+        if ": " in raw_title:
+            company, _, title = raw_title.partition(": ")
+        else:
+            company, title = "", raw_title
+        jobs.append({
+            "title": title,
+            "company": company,
+            "url": (item.findtext("link") or "").strip(),
+            "description": (item.findtext("description") or "").strip(),
+            "date": (item.findtext("pubDate") or "").strip() or None,  # RFC 822 -- see _extract_posted_at
+        })
+    return jobs
 
 
 def _looks_like_job_link(href: str, text: str) -> bool:
@@ -315,25 +425,74 @@ KNOWN_JOB_BOARD_TEMPLATES = {
             if _slugify(position) else None
         ),
     },
+    "simplyhired": {
+        "label": "SimplyHired",
+        "default_url": "https://www.simplyhired.com/",
+        # Confirmed working: ?q= genuinely filters server-side (a "software
+        # engineer" query returned real, correctly-matching listings with no
+        # JS needed).
+        "build_url": lambda position: (
+            f"https://www.simplyhired.com/search?q={quote_plus(position)}" if position.strip() else None
+        ),
+    },
+    "wellfound": {
+        "label": "Wellfound",
+        "default_url": "https://wellfound.com/jobs",
+        # Wellfound's search is a curated role taxonomy, not a free-text
+        # query -- confirmed working via its role-based URLs (fetching
+        # /role/r/software-engineer returned 1,827 real, correctly-filtered
+        # remote listings, no JS needed). Slugifying the position is a
+        # reasonable mapping for common titles ("Software Engineer" ->
+        # "software-engineer") but won't match Wellfound's taxonomy for
+        # unusual/oddly-phrased titles -- if the slug doesn't exist,
+        # Wellfound just returns an empty/generic page, and the position
+        # filter in run_search() then correctly narrows that down to
+        # nothing rather than surfacing irrelevant jobs.
+        "build_url": lambda position: (
+            f"https://wellfound.com/role/r/{_slugify(position)}" if _slugify(position) else None
+        ),
+    },
+    "gulftalent": {
+        "label": "GulfTalent",
+        "default_url": "https://www.gulftalent.com/jobs/category/software",
+        # GulfTalent's own ?keyword= query param does NOT filter for a plain
+        # unauthenticated request -- confirmed by testing: searching
+        # "software engineer" that way silently redirected to the same
+        # unfiltered "all jobs" listing (canonical ?pos_ref=all) as no query
+        # at all, the same failure mode Bayt's ?keyword= originally had (see
+        # its build_url above). Rather than scrape irrelevant jobs, this
+        # always points at GulfTalent's own Software category page (1,975+
+        # real listings, confirmed server-rendered) regardless of
+        # `position`, and leans on run_search()'s global position-filter
+        # safety net to narrow it down -- so unlike the other templates
+        # here, this source is only useful while searching for
+        # software-adjacent titles.
+        "build_url": lambda position: "https://www.gulftalent.com/jobs/category/software",
+    },
 }
 
 
 def seed_default_search_sites() -> None:
     """Populates models.SearchSite with KNOWN_JOB_BOARD_TEMPLATES the first
-    time the app runs, so the Search tab's site list isn't empty by default
-    and the user can see/remove them like any other site instead of them
-    being an invisible hardcoded behavior.
+    time each template exists, so the Search tab's site list isn't empty by
+    default and the user can see/remove them like any other site instead of
+    them being an invisible hardcoded behavior.
 
-    Gated on config.SEARCH_DEFAULT_SITES_SEEDED, not on "is the table
-    empty" -- a user who'd already added their own site(s) before this
-    feature existed (or just from using the app for a while) would make an
-    empty-table check false immediately, so the defaults would silently
-    never get added. The persisted flag is the actual source of truth: set
-    to true the first time this runs and never reset automatically, so
-    removing a default later doesn't bring it back.
+    Tracked per-template-key against config.SEARCH_DEFAULT_SITES_SEEDED (a
+    set of keys already seeded), not on "is the table empty" -- a user who'd
+    already added their own site(s) before this feature existed (or just
+    from using the app for a while) would make an empty-table check false
+    immediately, so the defaults would silently never get added. Per-key
+    tracking (rather than one global flag) also means adding a brand new
+    template later -- e.g. this file gaining a "gulftalent" entry after a
+    user's install already had "wuzzuf"/"bayt" seeded -- still gets that new
+    one seeded on the next run, without re-adding "wuzzuf"/"bayt" if the
+    user had deliberately removed either.
     """
     import config
-    if config.SEARCH_DEFAULT_SITES_SEEDED:
+    already_seeded = config.SEARCH_DEFAULT_SITES_SEEDED
+    to_seed = [key for key in KNOWN_JOB_BOARD_TEMPLATES if key not in already_seeded]
+    if not to_seed:
         return
 
     from db import get_session
@@ -341,9 +500,10 @@ def seed_default_search_sites() -> None:
     import env_store
     with get_session() as session:
         existing_types = {r[0] for r in session.query(SearchSite.site_type).all()}
-        for key, meta in KNOWN_JOB_BOARD_TEMPLATES.items():
+        for key in to_seed:
             if key in existing_types:
                 continue  # already present (e.g. re-added by hand) -- don't duplicate
+            meta = KNOWN_JOB_BOARD_TEMPLATES[key]
             session.add(SearchSite(
                 url=meta["default_url"],
                 site_type=key,
@@ -351,8 +511,9 @@ def seed_default_search_sites() -> None:
                 label=meta["label"],
             ))
 
-    env_store.update_env_file({"SEARCH_DEFAULT_SITES_SEEDED": "true"})
-    config.SEARCH_DEFAULT_SITES_SEEDED = True  # keep this process's config in sync too
+    updated = already_seeded | set(to_seed)
+    env_store.update_env_file({"SEARCH_DEFAULT_SITES_SEEDED": ",".join(sorted(updated))})
+    config.SEARCH_DEFAULT_SITES_SEEDED = updated  # keep this process's config in sync too
 
 
 def search_serpapi(query: str) -> list[dict]:
@@ -471,6 +632,20 @@ def run_search(
             broad += [{"source": "lever", "company_slug": company, **j} for j in jobs]
         except requests.RequestException as exc:
             source_errors.append({"source": "lever", "identifier": company, "error": str(exc)})
+
+    # Always-on structured sources -- no per-user config needed, unlike the
+    # Greenhouse/Lever loops above which depend on .env board tokens/slugs.
+    try:
+        jobs = _cap(_filter_relevant(search_remoteok(position), position, seniority), max_results_per_site)
+        broad += [{"source": "remoteok", **j} for j in jobs]
+    except (requests.RequestException, ValueError) as exc:  # ValueError -- unexpected JSON shape
+        source_errors.append({"source": "remoteok", "identifier": None, "error": str(exc)})
+
+    try:
+        jobs = _cap(_filter_relevant(search_weworkremotely(), position, seniority), max_results_per_site)
+        broad += [{"source": "weworkremotely", **j} for j in jobs]
+    except (requests.RequestException, ET.ParseError) as exc:
+        source_errors.append({"source": "weworkremotely", "identifier": None, "error": str(exc)})
 
     try:
         broad += search_from_watchlist(max_results_per_site=max_results_per_site, position=position, seniority=seniority)
