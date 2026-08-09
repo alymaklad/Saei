@@ -70,21 +70,48 @@ The main pipeline. `run_daily_search_and_apply()`:
    `(found_jobs, source_errors)` — a flat list of raw job dicts from every
    configured source, and a list of any individual sources that failed
    (a dead Lever slug, a network timeout) without aborting the rest.
-5. For each raw job: skips it if its URL is already in the `jobs` table
-   (`_job_exists`) — this is the whole dedupe mechanism, keyed on URL, and
-   it's why the job is safe to re-run as often as you want.
-6. For each *new* job, `_process_one_job()` runs inside a per-job SAVEPOINT
-   (`session.begin_nested()`), so one job blowing up (a flaky LLM call, a
-   malformed dict from a scraped site) rolls back only that job's own
-   half-written rows, not the whole batch already committed before it.
-   Inside it: insert a `Job` row, call `orchestrator_app.invoke(...)` (see
-   [Orchestrator](#orchestrator-the-per-job-state-machine) below) to score
-   and act on the job, then insert an `Application` row recording the
-   outcome, plus a `SkillGap` row if the orchestrator surfaced missing
-   skills.
-7. Returns `{"processed": [...], "errors": [...], "found": N,
+5. For each raw job with a URL, `_process_one_job()` handles dedupe and
+   persistence — see below.
+6. Returns `{"processed": [...], "errors": [...], "found": N,
    "source_errors": [...]}` — printed to stdout when run from the CLI,
    returned as JSON when triggered from `api.py`.
+
+**`_process_one_job(raw_job, cv_text)`** is split into three short,
+independent transactions rather than one transaction spanning the whole
+thing — a deliberate fix, not the original design:
+
+1. **`_insert_job_row()`** — dedupe-check (`_job_exists`, keyed on URL) plus
+   insert the `Job` row, in one short `with get_session()` block that
+   commits immediately. Returns `None` if the URL already exists, or if it
+   lost a race to another process inserting the same URL concurrently
+   (`Job.url`'s unique constraint raises `IntegrityError`, caught here).
+   Committing early (rather than deferring the insert) is what makes the
+   row's id available for the CV-output filename in step 2, without needing
+   to hold this transaction open while that happens.
+2. **`orchestrator_app.invoke(...)`** (see
+   [Orchestrator](#orchestrator-the-per-job-state-machine) below) runs with
+   **no open database transaction at all** — this is the important part. If
+   it raises, **`_delete_job_row()`** removes the row step 1 just committed,
+   so the URL is free to be retried on the next run instead of permanently
+   stuck behind the dedupe check with no `Application` row to show for it.
+3. **`_finalize_job()`** — a second short transaction inserting the
+   `Application` row (plus a `SkillGap` row if the orchestrator surfaced
+   missing skills).
+
+This replaced an earlier version where the entire batch loop ran inside one
+`with get_session()` block, with each job wrapped in only a `SAVEPOINT`
+(`session.begin_nested()`) for isolation — meaning the single underlying
+SQLite connection held its write lock from the first job's insert until the
+*whole batch* finished, including every job's orchestrator call (multiple
+LLM round-trips each). With dozens of jobs per run that could hold the lock
+for minutes. SQLite only allows one writer at a time even in WAL mode (see
+`db.py` below), so a second process writing during that window — the
+scheduler's own automatic run overlapping a manual "Search now" click, for
+example — failed outright with `sqlite3.OperationalError: database is
+locked`, a failure actually hit in production. Splitting into three short,
+independent transactions per job means the write lock is only ever held for
+a single row write (milliseconds), so real overlap between two runs just
+makes one wait briefly instead of erroring.
 
 ### `jobs/apply_from_link.py` — one URL, on demand
 
@@ -128,6 +155,16 @@ the whole configuration surface right now.
 `run_daily_report`, and `run_weekly_news_digest` and registers them on
 `APScheduler` cron triggers (8am / 8pm / Monday 9am). It has no logic of its
 own beyond that — every actual behavior described above lives in `jobs/`.
+
+It previously also scheduled a one-time "run all three jobs 1 minute after
+this process starts" block on every restart, added to verify the automation
+worked end-to-end without waiting for a real cron slot. That block is now
+commented out (not deleted — see the comment in `scheduler.py` for how to
+re-enable it) rather than removed outright, for two reasons: automation is
+confirmed working, and it was a direct contributor to the `database is
+locked` failures above — this test run firing while a manual "Search now"
+click was already mid-batch was exactly the kind of process overlap that
+surfaced the bug.
 
 ## Orchestrator: the per-job state machine
 
@@ -553,7 +590,19 @@ agent and job depends on them:
 - **`db.py`** — SQLAlchemy engine/session setup (SQLite,
   `expire_on_commit=False` so rows built inside a `with get_session()` block
   are still readable after it exits). `init_db()` creates tables and calls
-  `search_agent.seed_default_search_sites()`.
+  `search_agent.seed_default_search_sites()`. The engine is created with
+  `connect_args={"timeout": 30}` and a `connect` event listener sets
+  `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=30000` on every
+  connection — both layers exist because this app routinely has multiple
+  processes open on the same SQLite file at once (`api.py` + `scheduler.py`,
+  both started by `run.bat`; a manual CLI run on top of either), and
+  SQLite's defaults (`busy_timeout=0`, rollback-journal mode locking the
+  whole file per writer) turned real overlap between them into immediate
+  `database is locked` failures instead of a brief wait. See the
+  `jobs/daily_run.py` section above for the other half of this fix — a
+  long-held transaction can still exceed even a generous timeout, which is
+  why that file also splits its writes into short transactions rather than
+  relying on this alone.
 - **`models.py`** — the SQLAlchemy schema: `Job`, `Application`,
   `SkillGap`, `NewsDigest`, `EmailLog`, `SearchSite`, `ReportLog`. `Job.url`
   is the unique dedupe key referenced throughout `jobs/`.
@@ -597,8 +646,13 @@ agent and job depends on them:
 - **Idempotency** — `jobs/daily_run.py::_job_exists` (and the equivalent
   check in `apply_from_link.py`) — a job's URL is checked against the `jobs`
   table before any processing happens, so re-running the search job never
-  double-processes the same posting.
-- **Partial-failure isolation** — per-job `session.begin_nested()`
-  SAVEPOINTs in `daily_run.py`, and per-source try/except blocks in
-  `search_agent.run_search()` — one bad job or one dead source degrades
-  that one item, not the whole run.
+  double-processes the same posting. This also covers jobs that failed
+  mid-processing: `_delete_job_row()` removes a job's row if the
+  orchestrator raises after it was inserted, so a failed job is retried on
+  the next run instead of being silently and permanently skipped by this
+  same check.
+- **Partial-failure isolation** — `daily_run.py::_process_one_job` writes
+  each job in short, independent transactions (see above) rather than one
+  shared transaction or SAVEPOINT, and `search_agent.run_search()` wraps
+  each source in its own try/except — one bad job or one dead source
+  degrades that one item, not the whole run.
