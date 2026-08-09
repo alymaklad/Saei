@@ -6,6 +6,14 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# stray secret dumps -- never commit real API keys/tokens/certs, wherever
+# they end up living in the tree
+*api*key*
+*.pem
+*.key
+*secret*
+*token*.txt
+
 # runtime data — never commit real DB, credentials, generated CVs, or the
 # user's actual uploaded CV (personal data: name, contact info, history)
 data/*.db
