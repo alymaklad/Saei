@@ -1,349 +1,464 @@
 <p align="center">
-  <img src="frontend/assets/logo.png" alt="Job Application Agent logo" width="140">
+  <img src="frontend/assets/saei-logo.png" alt="Sa'ei logo" width="120">
 </p>
 
-# Job Application Agent
+<h1 align="center">Sa'ei · ساعي</h1>
+<p align="center"><em>Your AI career companion. It searches, matches and tailors for you, and applies only where you allow it.</em></p>
 
-Autonomous job-search & application agent. Searches for jobs, scores them against
-your CV, tailors your CV when the fit is low, auto-applies only on boards you've
-explicitly whitelisted, drafts applications everywhere else for your approval,
-tracks skill gaps, and sends daily/weekly reports.
+---
 
-Built entirely on free tools — see [Tech stack](#tech-stack) below. For a
-file-by-file technical walkthrough of how `agents/` and `jobs/` actually
-work, see [ARCHITECTURE.md](ARCHITECTURE.md).
+## The idea
 
-## Design principles
+Job hunting is mostly repetitive work. You check the same boards every day,
+read postings to decide whether they fit, rewrite your CV for each one, fill
+in forms, and track what you sent where. **Sa'ei** (Arabic *ساعي*, "the one
+who strives", also "the messenger") is a set of AI agents that does that work
+for you every day. Three rules shape how it behaves:
 
-1. **Whitelist-only auto-submit.** The agent only submits automatically on sources
-   you explicitly whitelist in `.env` (`WHITELISTED_SOURCES`). Everywhere else it
-   prepares a complete draft and waits for your approval.
-2. **Everything is logged.** Every job seen, scored, drafted, or applied to is
-   stored in SQLite — this powers the daily/weekly reports.
-3. **Deterministic + LLM hybrid scoring.** ATS scoring combines keyword/skill
-   overlap (matches how real ATS systems filter) with LLM judgment (context,
-   seniority fit).
-4. **Idempotent runs.** The agent never applies to the same job twice — dedupe
-   on job URL before acting.
-5. **Dry-run by default.** `DRY_RUN=true` in `.env` logs every send/submit
-   action instead of executing it, until you've verified the system works.
+1. **It never makes things up.** Your CV becomes one structured *profile*,
+   and that profile is the only thing any agent reads. A tailored CV
+   rephrases your real experience in the posting's own words. It never adds
+   skills you don't have; missing skills are reported as gaps instead.
+2. **Every score can be explained.** A match score or ATS score is never a
+   number the model made up. It's computed in Python from evidence, and every
+   point traces back to a specific line of your CV.
+3. **You decide what gets sent.** By default nothing is sent at all (dry
+   run). When sending is on, the agent submits automatically only on job
+   boards you've explicitly whitelisted. Everything else is prepared as a
+   complete draft and waits for your approval.
 
-## Tech stack (all free)
+Everything runs on free tools: local or free-tier AI models, public job-board
+APIs, your own Gmail, and a Telegram bot.
 
-| Component | Tool |
+---
+
+## How it works at a glance
+
+```mermaid
+flowchart TB
+    CV[/"Your CV<br/>(.pdf / .docx)"/] -->|extract once| P[("Profile<br/>single source of truth")]
+
+    subgraph Find["1 · Find"]
+        S["Search Agent<br/>Greenhouse · Lever · RemoteOK<br/>Wuzzuf · Bayt · your sites"]
+        Q["Query Expansion"] --> S
+    end
+
+    subgraph Judge["2 · Judge"]
+        R["Ranking Agent<br/>match score 0–1"]
+        A["ATS Agent<br/>requirement-level score"]
+    end
+
+    subgraph Act["3 · Act"]
+        T["CV Tailoring<br/>(only if score is low)"]
+        D{"Apply<br/>decision"}
+        AS["Auto-submit<br/>(whitelist only)"]
+        DR["Draft for your review"]
+    end
+
+    subgraph Report["4 · Report"]
+        E["Email Agent<br/>(your Gmail)"]
+        TG["Telegram<br/>daily + weekly"]
+        G["Skill-gap tracker"]
+    end
+
+    P --> Q & R & A & T
+    S --> R --> A
+    A -->|below fit threshold| T --> D
+    A -->|fits| D
+    D --> AS
+    D --> DR --> E
+    A --> G --> TG
+    DB[("SQLite<br/>everything is logged")]
+    AS & DR & E --> DB --> TG
+    DB --> UI["Sa'ei dashboard"]
+```
+
+A day in the life (all times are local, from `scheduler.py`):
+
+```mermaid
+timeline
+    title What runs automatically
+    8 AM daily : Search every source : Rank, score, tailor : Auto-submit or draft
+    8 PM daily : Telegram summary of the day
+    Monday 9 AM : Weekly news digest for your field
+    Any time : Launch discovery on the Search page runs the 8 AM pipeline on demand
+```
+
+---
+
+## Core concepts
+
+### 1. Your profile is the single record of you
+
+Uploading a CV extracts a structured profile (contact, summary, experience,
+projects, education, certifications, skills). **Every stage reads the
+profile, not the file**, so a correction you make on the Profile page
+reaches search, ranking, scoring and tailoring the next time they run.
+
+```mermaid
+flowchart TD
+    U["Upload CV<br/>(CV Studio page)"] -->|LLM extraction| P[("Profile")]
+    E["Hand edits<br/>(Profile page)"] --> P
+    P --> QE["Query expansion"]
+    P --> RK["Ranking"]
+    P --> ATS["ATS matching"]
+    P --> RW["CV tailoring"]
+    F[/"Raw CV file"/] -.->|only for| PC["Parse-compatibility check<br/>(is the document itself ATS-readable?)"]
+```
+
+> ⚠️ Uploading a new CV **replaces** the profile, including your hand edits.
+> To pick up changes from the file without losing edits, use
+> **Profile → Re-extract from CV**, which previews what would change first.
+
+### 2. Finding jobs: search wide, then rank carefully
+
+Job boards describe the same role in a dozen different ways, so finding jobs
+is split into two stages tuned in opposite directions. **Retrieval** favours
+recall (don't miss anything plausible). **Ranking** favours precision (put
+the best fits first).
+
+```mermaid
+flowchart TD
+    POS["Typed Position<br/>e.g. 'AI Engineer'"] --> QE["Query Expansion<br/>(1 LLM call, cached per Position)"]
+    QE --> PH["'AI Engineer', 'ML Engineer',<br/>'Generative AI Engineer', …"]
+
+    PH --> QS["Query-based sources<br/>SerpAPI · Wuzzuf · SimplyHired · career pages<br/>→ searched once per phrase"]
+    PH --> BS["Whole-board sources<br/>Greenhouse · Lever · RemoteOK · WWR<br/>→ everything fetched, then filtered"]
+
+    BS --> TP{"Title matches<br/>a phrase?"}
+    TP -->|yes| KEEP["Candidates"]
+    TP -->|no| SP{"Description semantically<br/>close to your profile?<br/>(embeddings)"}
+    SP -->|yes| KEEP
+    SP -->|no| DROP["Dropped<br/>(logged with reason)"]
+    QS --> KEEP
+
+    KEEP --> DEDUP["Dedupe on URL<br/>(never apply twice)"] --> RANK["Ranking Agent<br/>8 weighted factors, no LLM"]
+    RANK --> GATE{"≥ minimum<br/>match score?"}
+    GATE -->|yes| PIPE["Per-job pipeline ↓"]
+    GATE -->|no| HOLD["Held back<br/>(saves LLM calls)"]
+```
+
+The **semantic path** is what catches a "Backend Developer" posting during a
+"Software Engineer" search when the content genuinely fits you. Only jobs the
+title filter rejects are embedded; a job it already accepted isn't paid for
+twice.
+
+**The match score** answers *"is this job right for me?"*. It's a weighted
+sum of eight factors. Ranking deliberately uses no LLM, so ordinary search
+volume never uses up a free-tier quota.
+
+```mermaid
+pie showData
+    title Match score weights (agents/ranking_agent.py)
+    "Skills" : 32
+    "Semantic CV/JD similarity" : 20
+    "Experience" : 16
+    "Job title" : 12
+    "Location" : 8
+    "Education" : 4
+    "Salary" : 4
+    "Seniority" : 4
+```
+
+When a posting doesn't state something (salary and location often aren't
+listed), that factor scores **neutral, not zero**. A job isn't penalised for
+how its source happens to format postings.
+
+### 3. The ATS score: requirement by requirement, fully explained
+
+The ATS score answers a different question: *"would my CV get through this
+employer's screening?"* Rather than counting keywords, the ATS agent
+(`agents/ats_agent.py`):
+
+1. extracts every requirement from the posting (one LLM call),
+2. matches each requirement against your profile in up to three layers,
+   stopping as soon as one layer decides,
+3. computes the final score **in Python** from a credit table. No number a
+   model returns ever reaches the score.
+
+```mermaid
+flowchart TD
+    REQ["One requirement<br/>e.g. 'Python (required)'"] --> L1{"Layer 1 · Deterministic rules<br/>exact · alias · subset · prerequisite"}
+    L1 -->|decided| CREDIT["Credit from table<br/>+ evidence line from your CV"]
+    L1 -->|uncertain| L2["Layer 2 · Semantic retrieval<br/>embedding search over your CV's own lines<br/><b>nominates</b> evidence, never scores"]
+    L2 --> L3["Layer 3 · One batched LLM call per job<br/>judges only the still-uncertain requirements<br/>against their nominated evidence"]
+    L3 --> CREDIT
+    CREDIT --> BUCKET["Bucket score = earned ÷ possible"]
+    BUCKET --> SCORE["ATS score = weighted sum of buckets"]
+
+    GUARD["False-friend guard<br/>a LangGraph <b>ReAct</b> agent ≠ <b>React</b> frontend"] -.-> L1
+    IMPL["Prerequisites<br/>FastAPI + PyTorch + LLM work ⇒ credits Python"] -.-> L1
+```
+
+How the final number is weighted (`config.JOB_MATCH_WEIGHTS`):
+
+```mermaid
+pie showData
+    title ATS score bucket weights
+    "Required skills" : 45
+    "Experience" : 20
+    "Preferred skills" : 15
+    "Responsibilities" : 10
+    "Education" : 10
+```
+
+Buckets a posting doesn't mention (no education line, say) are left out, and
+their weight is spread over the rest. Inside a bucket, a *required* skill is
+worth more points than a *preferred* one. Separately, a **parse-compatibility
+check** (headers, length, bullet consistency, sections) grades the CV
+*document* Pass / Warning / Fail, since that's a property of the file, not of
+any one job.
+
+Every **Why?** button in the dashboard opens this breakdown: each
+requirement, how it matched (exact / alias / prerequisite / semantic / not
+found), the points it earned, and the CV line that proves it. It's built from
+the scoring pass itself, so explaining a score costs no extra LLM call.
+
+Details: [MATCHING.md](MATCHING.md) (the matcher) and
+[SCORING.md](SCORING.md) (the scoring pipeline, with a worked example).
+
+### 4. What happens to each job
+
+Every job that passes the match gate goes through a small LangGraph state
+machine (`orchestrator.py`):
+
+```mermaid
+stateDiagram-v2
+    [*] --> score : job + profile
+    score --> rewrite_cv : ATS score < FIT_THRESHOLD<br/>(or ATS_SCORE_MODE = tailored_only)
+    score --> decide_apply_path : ATS score ≥ FIT_THRESHOLD
+
+    rewrite_cv --> decide_apply_path : AUTO_APPLY_ON_TAILORED_SCORE on<br/>and tailored score clears the bar
+    rewrite_cv --> notified : otherwise
+    notified : Tailored CV saved,<br/>you're notified (status cv_rewritten_notify_user)
+    notified --> [*]
+
+    decide_apply_path --> auto_submit : source allowed by AUTO_APPLY_MODE
+    decide_apply_path --> draft_for_review : everything else
+    auto_submit --> [*]
+    draft_for_review --> [*] : waits on the Email page
+```
+
+The tailored CV is scored again against the same requirements, which costs
+one extra call rather than two. You see both numbers side by side, so you can
+check how much the tailoring actually helped.
+
+### 5. Who is allowed to press "send"
+
+```mermaid
+flowchart TD
+    J["Job ready to apply"] --> M{"AUTO_APPLY_MODE"}
+    M -->|off| DRAFT["Draft for review"]
+    M -->|whitelist · default| W{"Source in<br/>WHITELISTED_SOURCES?"}
+    W -->|no| DRAFT
+    W -->|yes| DRY
+    M -->|any| DRY{"DRY_RUN?"}
+    DRY -->|true · default| LOG["Logged only<br/>nothing leaves your machine"]
+    DRY -->|false| SUB["Real submission"]
+    DRAFT --> YOU["You review it on the Email page<br/>and press Send yourself"]
+```
+
+---
+
+## The dashboard
+
+`frontend/` is a static site: open `index.html` or serve the folder. It
+talks to the FastAPI backend in `api.py`, and its design comes from the
+**Sa'ei** project in Stitch.
+
+| Page | What it's for |
 |---|---|
-| Orchestration | LangGraph |
-| LLM | Ollama (local, free), Gemini API free tier, or Groq API free tier (fast hosted inference) |
-| Job search | Greenhouse + Lever public APIs (free), SerpAPI free tier (100/mo, optional) |
-| Watchlist | Google Sheets via `gspread` (free service account) |
-| CV parsing | `pdfplumber` / `python-docx` (reads your uploaded .pdf/.docx) |
-| Tailored CV output | `reportlab` (renders each rewrite as a real formatted .pdf) |
-| Email | Gmail API (OAuth, your own account, free) |
-| Reports | Telegram Bot API (free, unlimited) |
-| Scheduling | APScheduler |
-| Storage | SQLite via SQLAlchemy |
+| **Dashboard** | Stats, the pipeline stepper showing where things stand, top opportunities with an inline match audit, drafts awaiting review, top skill gaps, agent activity log |
+| **Search** | Target role, seniority, freshness and per-site limits; the list of job boards; *Launch discovery* to run the pipeline now; latest discoveries |
+| **Applications** | Every application, filterable, with an audit panel: ATS and match score rings, match breakdown, requirement evidence |
+| **CV Studio** | Master CV, upload, every tailored CV with its score change, and an **ATS & tailoring bench**: paste a job description and see the score and rewrite without saving anything |
+| **Profile** | Edit the extracted profile that every agent reads |
+| **Email** | Connect Gmail (OAuth), review pending drafts, send, view sent/failed history |
+| **Reports** | Skill-gap bars, the latest news digest, every Telegram report sent |
+| **Features** | The pipeline stages and the agent roster, each with one live number |
+| **Settings** | Auto-apply mode cards, ATS thresholds, LLM provider and keys, job-matching tuning |
 
-## Setup
-
-Pick one environment manager -- both install the exact same packages from
-`requirements.txt`, so it's a matter of preference.
-
-**venv:**
+Styling uses Tailwind, shipped **pre-compiled** as `frontend/tailwind.css`,
+and fonts are stored in the repo, so the dashboard needs no CDN and no build
+step to run. Only after you change Tailwind classes, rebuild from
+`frontend/`:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+npx tailwindcss@3 -c tailwind.config.js -i tailwind.src.css -o tailwind.css --minify
+```
+
+The dashboard is desktop-only (minimum width 1100px).
+
+---
+
+## Getting started
+
+### 1. Install
+
+```bash
+# venv
+python -m venv .venv && .venv\Scripts\activate      # source .venv/bin/activate on macOS/Linux
 pip install -r requirements.txt
-```
 
-**conda:**
+# …or conda
+conda env create -f environment.yml && conda activate job-agent
+```
 
 ```bash
-conda env create -f environment.yml
-conda activate job-agent
+cp .env.example .env     # then fill in what you plan to use
 ```
 
-(`conda env update -f environment.yml --prune` to sync after `requirements.txt` changes.)
+With only that, it already runs in dry-run mode: Greenhouse and Lever need
+no key, and `DRY_RUN=true` is the default.
 
-Either way:
+### 2. Pick a language model (any one, all free)
 
-```bash
-playwright install chromium   # only needed if you enable JS-rendered scraping
-cp .env.example .env          # fill in the values you plan to use
-```
+| Provider | Setup | Good to know |
+|---|---|---|
+| **Ollama** (local) | `ollama pull qwen3:4b` | Unmetered and private. A non-thinking instruct model (e.g. `qwen2.5:7b-instruct`) avoids reasoning leaking into output. |
+| **Gemini** | `GEMINI_API_KEY` | Free tier; the same key can also do embeddings. |
+| **Groq** | `GROQ_API_KEY` | Fastest hosted option. Capped at **200k tokens/day**. |
+| **OpenRouter** | `OPENROUTER_API_KEY` | ~400 models. `:free` ids are capped at **50 requests/day** (~15–20 jobs). |
 
-Minimum to run in dry-run mode with zero external accounts: nothing else —
-Greenhouse/Lever need no key, and `DRY_RUN=true` is the default.
+For semantic matching, also run `ollama pull nomic-embed-text` (or
+`qwen3-embedding:4b` for Arabic and mixed-language postings). Without an
+embedding model it still works; it just loses the semantic path's extra
+recall. Everything here can also be changed on the **Settings** page.
 
-To use free LLM scoring, pick one:
-- Install [Ollama](https://ollama.com), run `ollama pull llama3.1`, leave `LLM_PROVIDER=ollama`, or
-- Get a free [Gemini API key](https://aistudio.google.com/apikey) and set `LLM_PROVIDER=gemini` + `GEMINI_API_KEY`, or
-- Get a free [Groq API key](https://console.groq.com/keys) and set `LLM_PROVIDER=groq` + `GROQ_API_KEY`
-  (`GROQ_MODEL` defaults to `openai/gpt-oss-120b`; pick a different one from the dropdown on the
-  Settings page — Groq periodically retires models, check
-  [console.groq.com/docs/models](https://console.groq.com/docs/models) if a model stops working)
-  — hosted, no local install, and generally the fastest of the three since Groq runs on its own
-  inference hardware.
+### 3. Add your CV, then run
 
-All three are switchable from the dashboard's **Settings** page too, not just `.env`.
+Upload your CV on **CV Studio** (or drop it at `cv/current_cv.pdf`).
 
-Add your CV before running the daily job — either upload it through the
-dashboard's **CV** page (`frontend/cv.html`), or place a file by hand at
-`cv/current_cv.pdf` or `cv/current_cv.docx`.
+| | Command |
+|---|---|
+| **Windows, one click** | `run.bat` (venv) or `run_conda_quick.bat` (conda). Starts the API and scheduler and opens the dashboard. |
+| Run the pipeline once | `python jobs/daily_run.py` |
+| Apply from one link | `python jobs/apply_from_link.py "https://boards.greenhouse.io/acme/jobs/123"` |
+| Always-on scheduler | `python scheduler.py` |
+| API + dashboard | `uvicorn api:app --port 8000` and `python -m http.server 5500 --directory frontend` |
 
-## Running it
+Everything runs on your machine, so it stops when your machine sleeps. See
+[Deployment](#deployment) to keep it running unattended.
 
-**Windows, one click:** double-click `run.bat` (venv) or `run_conda.bat`
-(conda — creates/updates the `job-agent` environment automatically, no
-manual `conda env create` needed). First run copies `.env.example` to `.env`
-and opens it in Notepad so you can fill in real values — save, close, and
-double-click the script again. After that it starts the API, the scheduler,
-and opens the dashboard in your browser every time.
-
-`run_conda.bat` needs `conda activate` to work in a plain Command Prompt,
-which requires `conda init cmd.exe` to have been run once (the Anaconda/Miniconda
-installer usually offers this). If the API/Scheduler windows show a "conda is
-not recognized" or "CondaError: Run 'conda init'" error, either run that once
-from an Anaconda Prompt and restart your terminal, or just launch the script
-from an Anaconda Prompt directly.
-
-`run_conda.bat` runs `conda env update -f environment.yml --prune` on
-*every* launch to keep the environment in sync -- that's conda re-resolving
-and diffing the whole environment, which is slow (often 10-60+ seconds) even
-when nothing changed. Once you've run it successfully at least once, use
-`run_conda_quick.bat` instead for everyday launches: same script minus that
-sync step, so it just activates the existing `job-agent` env and starts
-immediately. Go back to `run_conda.bat` only after actually editing
-`environment.yml` (added/removed/upgraded a package), so the new env
-actually gets synced.
-
-To get a proper Desktop icon instead of digging into the project folder each
-time, double-click `create_desktop_shortcut.vbs` once — it creates a
-"Job Application Agent" shortcut on your Desktop that runs `run.bat`. One-time
-setup; the shortcut itself is reusable forever. (Edit the `.vbs` file's
-`targetBat` line to point at `run_conda.bat` instead if that's the one you use.)
-
-**Manually / other OS:**
-
-```bash
-# one-off: search everything configured, score, draft/apply
-python jobs/daily_run.py
-
-# one-off: apply from a single URL you found manually (cv_path optional if
-# you've already uploaded a CV via the dashboard's CV page)
-python jobs/apply_from_link.py "https://boards.greenhouse.io/acme/jobs/123" [cv_path]
-
-# start the always-on scheduler (daily search 08:00, daily report 20:00, weekly news Mon 09:00)
-python scheduler.py
-
-# dashboard API + frontend, in separate terminals
-uvicorn api:app --host 127.0.0.1 --port 8000
-python -m http.server 5500 --directory frontend
-```
-
-This is a local-only setup: the API, scheduler, and dashboard all run on your
-own machine, so everything stops when your machine sleeps or shuts down —
-there's no cloud host or scheduler keeping it running while you're away. See
-[Deployment](#deployment) if you want it running unattended on always-on
-infrastructure instead.
+---
 
 ## Enabling auto-submit
 
-Every board is draft-only until you add it to `WHITELISTED_SOURCES` in `.env`.
-Before whitelisting a board:
+Auto-submit is meant to be verified **one employer at a time**, not switched
+on everywhere at once:
 
-1. Inspect that specific board's application form fields (browser dev tools or
-   its public API) — every Greenhouse/Lever board can have different custom
-   fields (screening questions, EEO fields, etc).
-2. Implement the exact submit payload in `agents/apply_agent.py::auto_submit_greenhouse`
-   (currently a deliberate stub — `NotImplementedError`).
-3. Test end-to-end on one real or throwaway application with `DRY_RUN=true` first,
-   then `DRY_RUN=false`.
-4. Add `"greenhouse:<board_token>"` or `"lever:<company_slug>"` to `WHITELISTED_SOURCES`.
+1. Inspect that board's application form. Every Greenhouse/Lever board can
+   have its own custom fields.
+2. Implement its payload in `agents/apply_agent.py::auto_submit_greenhouse`.
+   This is currently a deliberate stub.
+3. Test with `DRY_RUN=true`, then on one real application with
+   `DRY_RUN=false`.
+4. Add `"greenhouse:<board_token>"` or `"lever:<company_slug>"` to
+   `WHITELISTED_SOURCES`.
 
-This is the one part of the system meant to be verified per employer, not automated blindly.
+Related settings (Settings → *Auto-apply* and *ATS & tailoring*):
+`AUTO_APPLY_MODE` (`off` / `whitelist` / `any`), `FIT_THRESHOLD` (default
+70%, below which the CV gets tailored), and `AUTO_APPLY_ON_TAILORED_SCORE`
+(off by default, because a higher score doesn't prove the rewrite overstated
+nothing).
 
-## Frontend + dashboard API
-
-`api.py` is a FastAPI layer over the same SQLite DB the agents write to, plus
-endpoints that write local config, upload files, and trigger sends for a
-single user. `frontend/` is a static, dependency-free HTML/CSS/JS dashboard
-(off-white, minimalist) — no build step required. Seven pages, linked from the
-nav bar on every page:
-
-- **Dashboard** (`index.html`) — stats, applications table, skill gaps, and
-  latest news digest.
-- **Search** (`search.html`) — configures what the search-and-apply pipeline
-  looks for, in three parts:
-  - **Position** — a job title/keyword, saved to `.env`
-    (`SEARCH_POSITION_QUERY`). Used as part of the SerpAPI/Google Jobs query,
-    and as a word-based title filter applied to every other source
-    (Greenhouse, Lever, RemoteOK, We Work Remotely, watchlist, added sites):
-    a title matches if it contains every significant word from Position, in
-    any order -- so "AI Engineer" matches "AI Software Engineer", "AI/ML
-    Software Engineer", "Gen AI Engineer", and "Gen AI/Agentic AI Engineer"
-    alike, not just titles containing that exact phrase
-    (`agents/search_agent.py::_matches_position`). Leave blank to pull
-    everything configured with no filter.
-  - **Seniority** — a dropdown (Intern, Entry Level, Mid Level, Senior, Lead,
-    Manager), saved to `.env` (`SEARCH_SENIORITY_LEVEL`). Also folded into
-    the SerpAPI query, and matched against every other source's job titles
-    via keyword heuristics (`agents/search_agent.py::SENIORITY_KEYWORDS` --
-    e.g. "senior"/"sr." for Senior, "intern" for Intern; Mid Level matches
-    titles with none of those keywords, since unlabeled titles are usually
-    mid-level in practice). It's a heuristic, not an exact classification.
-  - **Max time since posted** — a dropdown (Any time / 24 hours / 3 days /
-    week / 2 weeks / month), saved to `.env` (`SEARCH_MAX_AGE_DAYS`). Only
-    applied where a real posted date exists: Greenhouse's `first_published`,
-    Lever's `createdAt`, or SerpAPI's relative `detected_extensions.posted_at`
-    text ("3 days ago", etc). Added sites searched by the generic scraper
-    have no structured date, so they're never excluded by this filter.
-  - **Max results per site** — a dropdown (No limit / 10 / 25 / 50 / 100),
-    saved to `.env` (`SEARCH_MAX_RESULTS_PER_SITE`). Caps the raw results
-    kept from each individual Greenhouse board, Lever company, watchlist
-    row, or added site *before* any filtering -- useful for a large board
-    (some return 500+ jobs) or to keep the generic scraper's per-page
-    fetching polite. Defaults to no limit, matching the original behavior.
-  - **Default job boards** — Wuzzuf, Bayt.com, SimplyHired, Wellfound, and
-    GulfTalent are pre-added to the Job boards list below the first time the
-    app ever runs (`agents/search_agent.py::KNOWN_JOB_BOARD_TEMPLATES` +
-    `seed_default_search_sites`). Each was confirmed server-rendered and
-    scrapable with a plain unauthenticated request before being added;
-    LinkedIn, Indeed, and NaukriGulf were tested the same way and all block
-    unauthenticated requests or require JavaScript (LinkedIn's anti-bot HTTP
-    999, Indeed's 403, NaukriGulf's JS-only shell), so they're deliberately
-    excluded -- adding any of them manually to the list won't work either.
-    Unlike a normal added site, each template's search URL is rebuilt from
-    Position each run instead of being fixed (Wuzzuf/SimplyHired/Wellfound
-    skip the run entirely if Position is blank, since there's no query to
-    search with; GulfTalent's own query parameter doesn't actually filter
-    results server-side, so it always points at its Software category page
-    instead and relies on the position-filter applied to every source's
-    combined results) -- but otherwise they're ordinary rows: remove any of
-    them from the Search tab if you don't want them searched, same as any
-    site you add yourself.
-  - **Always-on structured sources** — RemoteOK (`agents/search_agent.py::
-    search_remoteok`) and We Work Remotely (`search_weworkremotely`) are
-    queried every run via their own free public JSON/RSS feeds, the same way
-    Greenhouse/Lever are, rather than through the generic HTML scraper.
-    They don't appear as rows on the Search tab (no per-user config needed)
-    and can't be removed from there -- if you don't want them searched,
-    that's currently a code change, not a dashboard toggle.
-  - **Job boards** — add any *additional* website URL (a specific company's
-    board, or another site not pre-added above). Greenhouse/Lever URLs
-    are detected automatically and searched via their public APIs, same as
-    the `.env`-configured boards; any other URL falls back to a best-effort
-    scraper (`agents/search_agent.py::search_generic_site`) that looks for
-    same-site links that look job-related — noisier than the API-backed
-    path, and worth checking a site's Terms of Service before adding it.
-    Stored in the `search_sites` table, editable (add/remove) from this page.
-  - **Search now** — runs the same pipeline the scheduler fires at 8am, on
-    demand, using whatever position/sites are currently saved. Blocks while
-    running -- can take a few minutes since it's one LLM call per new job
-    found.
-- **Settings** (`settings.html`) — choose the LLM provider (Ollama or Gemini)
-  and enter/replace the Gemini API key. Saved to `.env` on the machine running
-  `api.py` (`env_store.py` upserts the specific keys, preserving everything
-  else in the file). Takes effect immediately for `api.py` itself; the
-  scheduler is a separate process and needs a restart to pick up the change —
-  the page says so rather than pretending it's instant everywhere.
-- **CV** (`cv.html`) — shows the currently active CV (filename, parsed
-  preview) and lets you upload a replacement (.pdf/.docx, drag-and-drop or
-  file picker), plus a table of every tailored CV the rewrite step has
-  generated for low-fit jobs, with download links. The active CV is saved to
-  `cv/current_cv.<ext>`, which `jobs/daily_run.py` and `jobs/apply_from_link.py`
-  auto-detect via `cv_parser.find_default_cv()` instead of a hardcoded path.
-- **Email** (`email.html`) — connect your Gmail account (OAuth; needs a
-  client file at `credentials/gmail_credentials.json` from Google Cloud
-  Console first), send an email for any `pending_review` application (picks
-  the application, prefills a subject/body you can edit, attaches its CV),
-  and a table of every email ever sent — to, subject, job, status, date.
-  Every attempt is logged to the `email_logs` table regardless of outcome
-  (sent, dry-run, or failed), so the list is a real record, not just a cache
-  of the last session.
-- **Reports** (`reports.html`) — full history of daily application summaries
-  and weekly news digests sent over Telegram, each with its status
-  (sent/dry-run/failed) and the exact text that went out.
-- **Features** (`features.html`) — what each part of the system does, with a
-  couple of lines (current whitelist, dry-run state) pulled live from `/api/status`
-  rather than being static marketing copy, and links into the relevant page
-  for each capability's actual results.
-
-Search results, ATS scores, and the whitelist/draft split don't get their own
-pages — they're already the Dashboard's Applications table (score column +
-status column), so a separate tab would just duplicate the same rows with a
-narrower view. Skill gap tracking is likewise already on the Dashboard.
-
-```bash
-# backend (serves /api/*)
-uvicorn api:app --reload --port 8000
-
-# frontend — just open index.html, or serve the folder
-python -m http.server 5500 --directory frontend
-```
-
-Before deploying, edit `frontend/config.js` and change `API_BASE` to wherever
-`api.py` ends up running (see [Deployment](#deployment)).
+---
 
 ## Deployment
 
-**Frontend** — it's static files, so any free static host works: Cloudflare
-Pages, Netlify, Vercel, or GitHub Pages. Cloudflare Pages is a solid default:
-unlimited bandwidth, no build step needed (publish `frontend/` as-is).
+The frontend is static files, so any static host works (Cloudflare Pages,
+Netlify, Vercel, GitHub Pages). The backend needs a real, persistent Python
+process (SQLite, LangGraph, APScheduler), so serverless/WASM runtimes such as
+Cloudflare Workers can't run it.
 
-**Backend (`api.py` + `scheduler.py`)** — this needs a real, persistent Python
-process (SQLite file, LangGraph, APScheduler), which **Cloudflare Workers/Pages
-Functions can't run** — their Python runtime is WASM-based (Pyodide) and
-doesn't support SQLite's C extension or long-running schedulers. Free options
-that do work:
-- **Cloudflare Pages (frontend) + Cloudflare Tunnel (backend).** Run `api.py`
-  and `scheduler.py` on your own machine or a free VM, and use `cloudflared`
-  to give it a free public HTTPS URL — no separate hosting bill, and no code
-  changes needed.
-- **Render / Fly.io / PythonAnywhere free tier** for `api.py` directly (Render's
-  free web service sleeps when idle; Fly.io's free allowance stays warm).
-- **Google Cloud Compute Engine (Always Free e2-micro)** — same idea as the
-  Cloudflare Tunnel option above, on Google's forever-free VM instead of your
-  own machine. Step-by-step guide + deploy scripts: [`deploy/gcp/README.md`](deploy/gcp/README.md).
-
-## Testing
-
-```bash
-pytest
+```mermaid
+flowchart LR
+    B["Your browser"] --> CP["Static host<br/>(Cloudflare Pages)<br/>frontend/"]
+    B -->|"HTTPS · api.yourdomain.com"| CF["Cloudflare Tunnel"]
+    subgraph VM["Always-free VM · GCP e2-micro"]
+        CF --> API["api.py<br/>(127.0.0.1:8000)"]
+        SCH["scheduler.py"]
+        API & SCH --> DB[("SQLite")]
+    end
+    SCH --> TG["Telegram"] & GM["Gmail"]
 ```
 
-Covers: ATS score stays in 0–1 range, whitelist enforcement never lets a
-non-whitelisted (or spoofed) source auto-submit, and dedup prevents double-applying
-to the same job URL.
+**Google Cloud, free tier:** scripts are in `deploy/gcp/`.
+
+1. Create an `e2-micro` VM in `us-west1`, `us-central1` or `us-east1` with
+   `--metadata-from-file=startup-script=deploy/gcp/startup-script.sh`. The
+   script installs everything and registers `job-agent-api` and
+   `job-agent-scheduler` as systemd services that restart on crash and start
+   on reboot. For a private repo, put a token in `REPO_URL` first.
+2. SSH in and fill `/opt/job-agent/.env`. Use `LLM_PROVIDER=gemini`, since
+   1 GB of RAM can't run Ollama. Copy `credentials/*.json` over with
+   `gcloud compute scp`, then
+   `sudo systemctl restart job-agent-api job-agent-scheduler`.
+3. Install `cloudflared`, create a tunnel, and fill in
+   `deploy/gcp/cloudflared/config.yml.example` as
+   `/etc/cloudflared/config.yml`. The API gets a public HTTPS URL without
+   opening any port.
+4. Set `API_BASE` in `frontend/config.js` to that URL and redeploy the
+   frontend.
+
+To check that scheduled runs fire: `journalctl -u job-agent-scheduler -f`.
+
+---
 
 ## Project layout
 
 ```
-config.py            # all settings, read from .env
-models.py / db.py     # SQLite schema + session handling
-cv_parser.py          # PDF/docx -> text
-agents/                # one module per capability (search, ats, rewrite, apply, email, reporter, news, skill_gap)
-orchestrator.py        # LangGraph state machine wiring the agents together
-jobs/                  # entry points: daily_run, daily_report, weekly_news, apply_from_link
-ARCHITECTURE.md         # technical deep-dive: how every agents/ + jobs/ file works, end to end
-scheduler.py            # APScheduler cron triggers -> automatic daily/weekly execution
-api.py                  # FastAPI layer: dashboard data + settings + CV upload + email/reports
-env_store.py             # upserts specific keys in .env, preserving the rest
-cv/                      # current_cv.pdf/.docx lives here (gitignored -- personal data)
-cv_output/               # tailored CVs generated by the rewrite step, served for download
-requirements.txt        # pip package list -- single source of truth for versions
-environment.yml         # conda env definition, installs from requirements.txt
-run.bat                 # Windows one-click launcher (venv): API + scheduler + dashboard
-run_conda.bat           # same, but creates/updates (syncs) then activates the conda env
-run_conda_quick.bat     # same as run_conda.bat but skips the env sync -- faster everyday launch
-create_desktop_shortcut.vbs  # one-time: creates a Desktop shortcut to run.bat
-frontend/               # off-white dashboard: index/search/settings/cv/email/reports/features.html + config.js, no build step
-tests/                  # pytest suite
-deploy/gcp/             # Compute Engine (Always Free e2-micro) deploy scripts + guide
+config.py / .env        settings (the Settings page writes .env via env_store.py)
+models.py / db.py       SQLite schema + sessions
+cv_parser.py            PDF/DOCX → text
+profile_store.py        the stored profile every stage reads
+orchestrator.py         LangGraph state machine for one job
+scheduler.py            08:00 search · 20:00 report · Mon 09:00 news
+api.py                  FastAPI backend for the dashboard
+agents/                 search · query_expansion · ranking · ats · cv_rewriter/render/targeting
+                        apply · email · reporter · news · skill_gap
+                        + matcher internals: skill_matching, semantic_matching,
+                          evidence_retrieval, requirement_normalizer, embeddings, llm
+services/               embedding cache + per-CV semantic index
+jobs/                   entry points: daily_run, daily_report, weekly_news, apply_from_link
+frontend/               the Sa'ei dashboard (9 pages + shell.js, ui.js, config.js)
+bench/                  labelled matching cases, precision/recall + calibration
+tests/                  pytest suite
+deploy/gcp/             VM startup script, systemd units, cloudflared config
+ARCHITECTURE.md         file-by-file technical deep-dive
+MATCHING.md             how a CV is matched against a job description
+SCORING.md              the ATS scoring pipeline, with a worked example
 ```
 
-## Key cautions
+## Testing
 
-- Never fabricate CV content — the rewriter reframes real experience, never invents skills.
-- Respect job board Terms of Service — stick to public APIs or explicit permission.
-- Rate-limit searches/applications — too many automated requests can get an IP or account flagged.
-- Review before scaling auto-submit — start draft-for-review everywhere, whitelist one board at a time.
+```bash
+pytest                              # whole app: whitelist enforcement, dedup, profile-first pipeline, matcher layers…
+python -m bench.report              # matcher precision/recall + score regression
+python -m bench.report --calibrate  # re-derive semantic thresholds after changing embedding model
+```
+
+## Tech stack (all free)
+
+| Layer | Tools |
+|---|---|
+| Orchestration | LangGraph, APScheduler |
+| LLM | Ollama · Gemini · Groq · OpenRouter |
+| Embeddings | Ollama `nomic-embed-text` / `qwen3-embedding:4b` · Gemini `gemini-embedding-001` |
+| Job sources | Greenhouse & Lever APIs, RemoteOK, We Work Remotely, SerpAPI (optional), Google Sheets watchlist, scraped career pages |
+| Documents | `pdfplumber`, `python-docx`, `reportlab` |
+| Delivery | Gmail API (OAuth), Telegram Bot API |
+| Storage / API | SQLite + SQLAlchemy, FastAPI |
+| Frontend | Static HTML/JS + pre-compiled Tailwind |
+
+## Cautions
+
+- **Respect each board's Terms of Service.** Use public APIs or sites that
+  allow access. LinkedIn and Indeed block automated requests and are
+  deliberately not supported.
+- **Rate-limit yourself.** Too many automated requests can get an IP or
+  account flagged.
+- **Scale auto-submit slowly.** Start with drafts everywhere, then whitelist
+  one board at a time.
+- **Scores from before 2026-08-26 aren't comparable.** They came from the
+  retired four-pillar engine. Recalibrate `FIT_THRESHOLD` from real runs.

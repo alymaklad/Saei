@@ -1,12 +1,31 @@
 """
-Apply Agent — whitelist-only auto-submit logic.
+Apply Agent — the single gate any job passes through before it can be
+marked for real auto-submission.
 
-Design rule (non-negotiable): the agent only auto-submits on sources you've
-explicitly whitelisted in .env (WHITELISTED_SOURCES). Everywhere else it
-prepares a complete draft and waits for your approval. See
-agents/search_agent.py:WHITELISTABLE_SOURCES for which source types can ever
-be whitelisted at all (only Greenhouse/Lever, since they're the only ones
-with a documented public API to submit against).
+decide_apply_path(job) is governed by config.AUTO_APPLY_MODE (Settings
+page's "Auto-Apply Behavior" panel), one of three values:
+
+  "off"       — never auto-submit. Every job drafts for review, full stop.
+  "any"       — auto-submit regardless of source, ignoring
+                WHITELISTABLE_SOURCES/WHITELISTED_SOURCES entirely. This is
+                a deliberate, explicit opt-in escape hatch from the
+                whitelist-only default below -- see the module-level note in
+                config.py for what it does and doesn't currently enable
+                (auto_submit_greenhouse is still a Greenhouse-only stub, so
+                this mode changes *routing*, not what a non-Greenhouse job
+                can actually have submitted for it).
+  "whitelist" — (default) the original design: only auto-submit on sources
+                you've explicitly whitelisted in .env (WHITELISTED_SOURCES).
+                Everywhere else it prepares a complete draft and waits for
+                your approval. See agents/search_agent.py:WHITELISTABLE_SOURCES
+                for which source types can ever be whitelisted at all (only
+                Greenhouse/Lever, since they're the only ones with a
+                documented public API to submit against).
+
+This is also the single gate a job re-entering here via orchestrator.py's
+route_after_rewrite (a rewritten CV whose tailored score cleared the fit
+threshold) passes through -- so AUTO_APPLY_MODE applies identically whether
+a job arrived here directly or via a CV rewrite.
 """
 import config
 from agents.search_agent import WHITELISTABLE_SOURCES
@@ -20,6 +39,13 @@ def _job_whitelist_key(job: dict) -> str:
 
 
 def decide_apply_path(job: dict) -> str:
+    mode = config.AUTO_APPLY_MODE
+    if mode == "off":
+        return "draft_for_review"
+    if mode == "any":
+        return "auto_submit"
+    # mode == "whitelist" (also the fallback config.py uses for any
+    # unrecognized value, so this branch is the safe default either way).
     source = job.get("source", "")
     if source not in WHITELISTABLE_SOURCES:
         return "draft_for_review"

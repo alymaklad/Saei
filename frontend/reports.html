@@ -3,45 +3,133 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Application Agent — Reports</title>
+<title>Sa'ei — Reports</title>
+<link rel="stylesheet" href="tailwind.css">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" href="assets/saei-logo.png">
 </head>
-<body>
-<div class="page">
+<body data-page="reports">
+<main id="page">
+  <div class="flex flex-col space-y-8">
 
-  <header class="topbar">
-    <div class="brand">
-      <img src="assets/logo-128.png" alt="" class="brand-mark">
-      <h1>Job Application Agent</h1>
-    </div>
-    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
-  </header>
-
-  <nav class="mainnav">
-    <a href="index.html" class="navlink">Dashboard</a>
-    <a href="search.html" class="navlink">Search</a>
-    <a href="settings.html" class="navlink">Settings</a>
-    <a href="cv.html" class="navlink">CV</a>
-    <a href="email.html" class="navlink">Email</a>
-    <a href="reports.html" class="navlink active">Reports</a>
-    <a href="features.html" class="navlink">Features</a>
-  </nav>
-
-  <main class="narrow-main">
-    <section class="card">
-      <div class="card-header">
-        <h2>Report history</h2>
-        <span class="card-sub">Daily application summaries + weekly news digests sent over Telegram</span>
+    <div class="flex flex-col justify-between gap-6 pb-2 xl:flex-row xl:items-end">
+      <div>
+        <div class="mb-3 flex flex-wrap items-center gap-2">
+          <span class="sa-eyebrow"><span class="ms text-[14px]">summarize</span>Reports &amp; intelligence</span>
+          <span class="sa-chip-teal"><span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>Delivered over Telegram</span>
+        </div>
+        <h1 class="sa-page-title">Career Reports &amp; Market Intelligence</h1>
+        <p class="sa-page-desc">Skill gaps mapped across the jobs you matched, the weekly news digest for your field, and every summary the agent has sent you.</p>
       </div>
-      <div id="reports-list" class="reports-list">Loading&hellip;</div>
+      <div class="flex items-center gap-3 rounded-2xl bg-surface-container-lowest px-4 py-3 shadow-sm">
+        <span class="ms text-secondary">send</span>
+        <div>
+          <span class="block text-label-sm uppercase tracking-wider text-on-surface-variant">Last dispatch</span>
+          <span class="text-label-lg text-on-surface" id="last-dispatch">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="sa-card p-5">
+        <div class="flex items-start justify-between">
+          <span class="text-label-md uppercase tracking-wider text-on-surface-variant">Cataloged skill gaps</span>
+          <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-fixed/60 text-primary"><span class="ms">target</span></span>
+        </div>
+        <div class="mt-2 flex items-baseline gap-2"><span class="text-headline-xl font-bold text-on-surface" id="stat-gaps">&mdash;</span><span class="text-label-md text-primary">deficits</span></div>
+        <p class="mt-2 text-label-sm text-on-surface-variant" id="stat-gaps-sub"></p>
+      </div>
+      <div class="sa-card p-5">
+        <div class="flex items-start justify-between">
+          <span class="text-label-md uppercase tracking-wider text-on-surface-variant">Reports delivered</span>
+          <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary-container/70 text-secondary"><span class="ms">mark_chat_read</span></span>
+        </div>
+        <div class="mt-2 flex items-baseline gap-2"><span class="text-headline-xl font-bold text-secondary" id="stat-delivered">&mdash;</span><span class="text-label-md text-on-surface-variant" id="stat-delivered-rate"></span></div>
+        <p class="mt-2 text-label-sm text-on-surface-variant">Daily summaries + weekly digests</p>
+      </div>
+      <div class="sa-card p-5">
+        <div class="flex items-start justify-between">
+          <span class="text-label-md uppercase tracking-wider text-on-surface-variant">Failed dispatches</span>
+          <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-error-container/70 text-error"><span class="ms">sms_failed</span></span>
+        </div>
+        <div class="mt-2 flex items-baseline gap-2"><span class="text-headline-xl font-bold text-on-surface" id="stat-failed">&mdash;</span></div>
+        <p class="mt-2 text-label-sm text-on-surface-variant">Errors are shown on each report below</p>
+      </div>
+      <div class="sa-card p-5">
+        <div class="flex items-start justify-between">
+          <span class="text-label-md uppercase tracking-wider text-on-surface-variant">Top gap coverage</span>
+          <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-tertiary-fixed/70 text-tertiary"><span class="ms">trending_up</span></span>
+        </div>
+        <div class="mt-2 flex items-baseline gap-2"><span class="text-headline-xl font-bold text-primary" id="stat-topgap">&mdash;</span><span class="text-label-md text-on-surface-variant">jobs</span></div>
+        <p class="mt-2 text-label-sm text-on-surface-variant" id="stat-topgap-sub">would credit the most-missed skill</p>
+      </div>
+    </div>
+
+    <!-- Skill gaps -->
+    <section class="sa-card md:p-8">
+      <div class="mb-6 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="ms text-primary">psychology_alt</span>
+            <h2 class="text-headline-lg font-bold tracking-tight text-on-surface">Skill Gaps &amp; Market Alignment</h2>
+          </div>
+          <p class="mt-1 text-body-sm text-on-surface-variant">How often each required skill came up missing across your recently saved job postings.</p>
+        </div>
+        <span class="sa-chip-teal self-start md:self-auto" id="gaps-chip"></span>
+      </div>
+      <div class="mb-6 hidden items-start gap-4 rounded-2xl bg-surface-container-low p-5" id="gap-highlight"></div>
+      <ul class="grid grid-cols-1 gap-x-10 gap-y-4 md:grid-cols-2" id="skill-gaps-list">
+        <li class="sa-empty md:col-span-2">Loading&hellip;</li>
+      </ul>
     </section>
-  </main>
 
-</div>
+    <!-- News digest -->
+    <section>
+      <div class="mb-4 flex items-end justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <span class="ms text-primary">newspaper</span>
+          <h2 class="text-headline-lg font-bold tracking-tight text-on-surface">News Digest &amp; Market Pulse</h2>
+        </div>
+        <span class="font-mono text-label-sm text-on-surface-variant">Weekly cadence</span>
+      </div>
+      <div class="sa-card grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div class="lg:col-span-8" id="news-content">
+          <p class="sa-empty">Loading&hellip;</p>
+        </div>
+        <div class="rounded-2xl bg-surface-container-low p-5 lg:col-span-4">
+          <div class="mb-2 flex items-center gap-2 text-label-lg text-on-surface"><span class="ms text-[18px] text-tertiary">schedule</span>How the digest works</div>
+          <p class="text-body-sm text-on-surface-variant">Every Monday at 9:00 the Reports agent gathers news for your field and sends the digest to your Telegram chat. The daily summary goes out at 20:00 with what the agent did that day. Both need the scheduler running.</p>
+          <a href="settings.html" class="sa-btn sa-btn-sm mt-4 w-full"><span class="ms text-[16px]">tune</span>Settings</a>
+        </div>
+      </div>
+    </section>
 
+    <!-- Report history -->
+    <section>
+      <div class="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-end">
+        <div>
+          <h2 class="text-headline-lg font-bold tracking-tight text-on-surface">Report History &amp; Dispatch Timeline</h2>
+          <p class="text-body-sm text-on-surface-variant">Every daily summary and weekly digest sent over Telegram.</p>
+        </div>
+        <div class="sa-tabs" id="report-tabs">
+          <button type="button" class="sa-tab is-active" data-filter="">All reports <span data-count=""></span></button>
+          <button type="button" class="sa-tab" data-filter="daily">Daily summaries</button>
+          <button type="button" class="sa-tab" data-filter="weekly">Weekly news</button>
+        </div>
+      </div>
+      <div id="reports-list" class="flex flex-col space-y-4">
+        <p class="sa-empty">Loading&hellip;</p>
+      </div>
+      <div class="mt-4 flex justify-center" id="reports-view-all-row" hidden>
+        <button type="button" id="reports-view-all-btn" class="sa-btn"><span id="reports-view-all-label"></span></button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="shell.js"></script>
 <script src="config.js"></script>
+<script src="ui.js"></script>
 <script src="reports.js"></script>
 </body>
 </html>

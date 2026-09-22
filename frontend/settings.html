@@ -3,100 +3,366 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Application Agent — Settings</title>
+<title>Sa'ei — Settings</title>
+<link rel="stylesheet" href="tailwind.css">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" href="assets/saei-logo.png">
 </head>
-<body>
-<div class="page">
+<body data-page="settings">
+<main id="page">
+  <div class="flex max-w-6xl flex-col space-y-8">
 
-  <header class="topbar">
-    <div class="brand">
-      <img src="assets/logo-128.png" alt="" class="brand-mark">
-      <h1>Job Application Agent</h1>
+    <div>
+      <h1 class="sa-page-title">Settings &amp; Autonomous Guardrails</h1>
+      <p class="sa-page-desc">Configure auto-apply behaviour, ATS thresholds, the language model, and how jobs are matched. Everything is saved to <code>.env</code> on the machine running the API.</p>
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <span class="inline-flex items-center gap-2 rounded-lg bg-surface-container-low px-3 py-2 text-label-md text-on-surface">
+          <span class="ms text-[18px] text-secondary">verified_user</span>Preferences stay on this machine
+        </span>
+        <span class="text-label-sm text-on-surface-variant">The scheduler is a separate process — restart it (<code>run.bat</code>) to pick up changes.</span>
+      </div>
     </div>
-    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
-  </header>
 
-  <nav class="mainnav">
-    <a href="index.html" class="navlink">Dashboard</a>
-    <a href="search.html" class="navlink">Search</a>
-    <a href="settings.html" class="navlink active">Settings</a>
-    <a href="cv.html" class="navlink">CV</a>
-    <a href="email.html" class="navlink">Email</a>
-    <a href="reports.html" class="navlink">Reports</a>
-    <a href="features.html" class="navlink">Features</a>
-  </nav>
+    <nav class="sa-tabs sticky top-20 z-20 self-start shadow-sm" aria-label="Settings sections">
+      <a href="#auto-apply" class="sa-tab is-active" data-section>Auto-apply modes</a>
+      <a href="#ats" class="sa-tab" data-section>ATS &amp; tailoring</a>
+      <a href="#llm" class="sa-tab" data-section>LLM &amp; inference</a>
+      <a href="#matching" class="sa-tab" data-section>Job matching</a>
+    </nav>
 
-  <main class="narrow-main">
-    <section class="card">
-      <div class="card-header">
-        <h2>LLM provider</h2>
-        <span class="card-sub">Used for ATS scoring and CV rewriting</span>
+    <!-- ================= Auto-apply ================= -->
+    <form id="auto-apply-form" class="flex flex-col space-y-8">
+      <section class="sa-card scroll-mt-36 md:p-8" id="auto-apply">
+        <div class="mb-6 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+          <div class="flex items-start gap-3">
+            <span class="sa-icon-badge"><span class="ms">smart_toy</span></span>
+            <div>
+              <h2 class="text-headline-md font-bold text-on-surface">Autonomous Auto-Apply Behavior</h2>
+              <p class="text-body-sm text-on-surface-variant">Controls whether the agent can ever submit an application without your review.</p>
+            </div>
+          </div>
+          <span class="sa-chip-teal self-start" id="mode-guardrail-chip"></span>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-3" id="mode-cards">
+          <button type="button" data-mode="off" class="mode-card">
+            <span class="mode-card-kicker">Mode A</span>
+            <span class="mode-card-title">Pure Copilot</span>
+            <span class="mode-card-desc">Every job drafts for review — nothing ever auto-submits. Sa'ei prepares the documents and stops.</span>
+            <span class="mode-card-foot"><span class="ms text-[16px]">touch_app</span>Human dispatch only</span>
+          </button>
+          <button type="button" data-mode="whitelist" class="mode-card">
+            <span class="mode-card-kicker">Mode B</span>
+            <span class="mode-card-title">Controlled Whitelist</span>
+            <span class="mode-card-desc">Only sources you've added to <code>WHITELISTED_SOURCES</code> ever auto-submit. The recommended default.</span>
+            <span class="mode-card-foot text-secondary"><span class="ms text-[16px]">verified_user</span>Vetted sources only</span>
+          </button>
+          <button type="button" data-mode="any" class="mode-card">
+            <span class="mode-card-kicker">Mode C</span>
+            <span class="mode-card-title">Autonomous Agent</span>
+            <span class="mode-card-desc">Auto-submits regardless of source. Real submission is still limited to hand-verified Greenhouse boards.</span>
+            <span class="mode-card-foot text-tertiary"><span class="ms text-[16px]">bolt</span>Ignores the whitelist</span>
+          </button>
+        </div>
+        <div class="form-field" hidden>
+          <label for="auto-apply-mode">Auto-apply mode</label>
+          <select id="auto-apply-mode" name="auto_apply_mode">
+            <option value="off">Off — never auto-apply</option>
+            <option value="any">Auto-Apply (any website)</option>
+            <option value="whitelist">Auto-Apply (whitelist only)</option>
+          </select>
+        </div>
+        <p class="mt-4 flex items-start gap-2 rounded-xl bg-surface-container-low px-4 py-3 text-body-sm text-on-surface-variant">
+          <span class="ms text-[18px] text-primary">info</span><span id="auto-apply-mode-desc"></span>
+        </p>
+      </section>
+
+      <section class="sa-card scroll-mt-36 md:p-8" id="ats">
+        <div class="mb-6 flex items-start gap-3">
+          <span class="sa-icon-badge bg-secondary-container/70 text-secondary"><span class="ms">tune</span></span>
+          <div>
+            <h2 class="text-headline-md font-bold text-on-surface">ATS Fit &amp; Tailoring Thresholds</h2>
+            <p class="text-body-sm text-on-surface-variant">When a CV gets rewritten, and whether a rewritten CV may continue to auto-apply.</p>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-4">
+          <div class="form-field rounded-2xl bg-surface-container-low p-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <label for="fit-threshold" class="!text-label-lg !text-on-surface">ATS fit threshold</label>
+                <p class="mt-1 text-body-sm text-on-surface-variant">Jobs whose original CV scores below this get a rewritten, tailored CV instead of going straight to the auto-apply decision. Default 70%.</p>
+              </div>
+              <div class="threshold-input-wrap w-28">
+                <input type="number" id="fit-threshold" name="fit_threshold" min="1" max="100" step="1">
+                <span class="threshold-input-suffix">%</span>
+              </div>
+            </div>
+            <input type="range" id="fit-threshold-range" min="1" max="100" step="1" class="sa-range mt-4" aria-label="ATS fit threshold">
+            <div class="mt-1 flex justify-between text-label-sm text-on-surface-variant">
+              <span>1% — tailor almost never</span><span>Recommended 70–80%</span><span>100% — tailor everything</span>
+            </div>
+          </div>
+
+          <div class="form-field rounded-2xl bg-surface-container-low p-5">
+            <label for="ats-score-mode" class="!text-label-lg !text-on-surface">ATS scoring</label>
+            <div class="sa-select-wrap mt-2">
+              <select id="ats-score-mode" name="ats_score_mode" class="!bg-surface-container-lowest">
+                <option value="both">Score my CV and the tailored one</option>
+                <option value="tailored_only">Score the tailored CV only</option>
+              </select>
+            </div>
+            <span class="field-hint" id="ats-score-mode-desc"></span>
+          </div>
+
+          <label class="toggle-row rounded-2xl bg-surface-container-low p-5">
+            <span class="toggle-text">
+              <span class="toggle-title">Auto-apply on tailored CV score <span class="sa-chip-teal">High confidence</span></span>
+              <span class="toggle-desc">When on, a rewritten CV that clears the ATS fit threshold can auto-apply too (still subject to the mode above). When off, a rewritten CV always stops for your review.</span>
+            </span>
+            <span class="toggle-switch">
+              <input type="checkbox" id="toggle-auto-apply-tailored">
+              <span class="toggle-track"></span>
+              <span class="toggle-thumb"></span>
+            </span>
+          </label>
+        </div>
+
+        <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
+          <div class="mr-auto"><span id="auto-apply-save-message" class="save-message"></span></div>
+          <button type="submit" class="sa-btn-primary"><span class="ms text-[18px]">published_with_changes</span>Commit policies</button>
+        </div>
+      </section>
+    </form>
+
+    <!-- ================= LLM ================= -->
+    <section class="sa-card scroll-mt-36 md:p-8" id="llm">
+      <div class="mb-6 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div class="flex items-start gap-3">
+          <span class="sa-icon-badge bg-tertiary-fixed/70 text-tertiary"><span class="ms">memory</span></span>
+          <div>
+            <h2 class="text-headline-md font-bold text-on-surface">LLM &amp; Inference Engine</h2>
+            <p class="text-body-sm text-on-surface-variant">Local models for privacy, or fast hosted providers for heavier work.</p>
+          </div>
+        </div>
+        <span class="text-label-sm text-on-surface-variant">Takes effect immediately for the dashboard API</span>
       </div>
 
-      <form id="settings-form" class="form">
-        <div class="form-field">
+      <form id="settings-form" class="flex flex-col gap-6">
+        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" id="provider-cards">
+          <button type="button" data-provider="ollama" class="provider-card">
+            <span class="provider-card-head"><span class="provider-dot"></span><span class="provider-badge">Local · free</span></span>
+            <span class="provider-card-title">Ollama</span>
+            <span class="provider-card-desc">Runs on this machine, no key</span>
+          </button>
+          <button type="button" data-provider="gemini" class="provider-card">
+            <span class="provider-card-head"><span class="provider-dot"></span><span class="provider-badge">Free tier</span></span>
+            <span class="provider-card-title">Google Gemini</span>
+            <span class="provider-card-desc">Needs an API key</span>
+          </button>
+          <button type="button" data-provider="groq" class="provider-card">
+            <span class="provider-card-head"><span class="provider-dot"></span><span class="provider-badge">LPU accel</span></span>
+            <span class="provider-card-title">Groq</span>
+            <span class="provider-card-desc">Fast hosted inference, key</span>
+          </button>
+          <button type="button" data-provider="openrouter" class="provider-card">
+            <span class="provider-card-head"><span class="provider-dot"></span><span class="provider-badge">Multi-router</span></span>
+            <span class="provider-card-title">OpenRouter</span>
+            <span class="provider-card-desc">~400 models, one key</span>
+          </button>
+        </div>
+        <div class="form-field" hidden>
           <label for="llm-provider">API provider</label>
           <select id="llm-provider" name="llm_provider">
             <option value="ollama">Ollama (local, free, no key)</option>
             <option value="gemini">Google Gemini (free tier, needs an API key)</option>
             <option value="groq">Groq (free tier, fast hosted inference, needs an API key)</option>
+            <option value="openrouter">OpenRouter (~400 models behind one key, needs an API key)</option>
           </select>
         </div>
 
-        <div class="form-field" id="ollama-fields">
-          <label for="ollama-model">Ollama model</label>
-          <input type="text" id="ollama-model" name="ollama_model" placeholder="llama3.1">
-          <label for="ollama-base-url" class="form-field-secondary-label">Ollama base URL</label>
-          <input type="text" id="ollama-base-url" name="ollama_base_url" placeholder="http://localhost:11434">
+        <div class="rounded-2xl bg-surface-container-low p-5">
+          <div class="form-field" id="ollama-fields">
+            <label for="ollama-model">Ollama model</label>
+            <input type="text" id="ollama-model" name="ollama_model" placeholder="qwen3:4b">
+            <label for="ollama-base-url" class="form-field-secondary-label">Ollama base URL</label>
+            <input type="text" id="ollama-base-url" name="ollama_base_url" placeholder="http://localhost:11434">
+            <p class="field-note field-note-muted" id="ollama-status">Checking Ollama&hellip;</p>
+          </div>
+
+          <div class="form-field" id="gemini-fields">
+            <div class="field-row-between">
+              <label for="gemini-api-key">Google Gemini API key</label>
+              <a class="field-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get free key &nearr;</a>
+            </div>
+            <div class="password-wrap">
+              <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
+              <button type="button" class="password-toggle" data-target="gemini-api-key" aria-label="Toggle visibility"><span class="ms text-[18px]">visibility</span></button>
+            </div>
+            <p class="field-note field-note-muted" id="gemini-key-status"></p>
+          </div>
+
+          <div class="form-field" id="groq-fields">
+            <div class="field-row-between">
+              <label for="groq-api-key">Groq API key</label>
+              <a class="field-link" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get free key &nearr;</a>
+            </div>
+            <div class="password-wrap">
+              <input type="password" id="groq-api-key" name="groq_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
+              <button type="button" class="password-toggle" data-target="groq-api-key" aria-label="Toggle visibility"><span class="ms text-[18px]">visibility</span></button>
+            </div>
+            <p class="field-note field-note-muted" id="groq-key-status"></p>
+            <label for="groq-model" class="form-field-secondary-label">Groq model</label>
+            <div class="sa-select-wrap">
+              <select id="groq-model" name="groq_model" class="w-full">
+                <option value="openai/gpt-oss-120b">openai/gpt-oss-120b — large, recommended default</option>
+                <option value="openai/gpt-oss-20b">openai/gpt-oss-20b — smaller, faster</option>
+                <option value="qwen/qwen3.6-27b">qwen/qwen3.6-27b — alternative general-purpose (preview)</option>
+                <option value="groq/compound">groq/compound — agentic, built-in web search/code exec</option>
+                <option value="groq/compound-mini">groq/compound-mini — smaller agentic variant</option>
+                <option value="__custom__">Custom&hellip; (type a model id)</option>
+              </select>
+            </div>
+            <!-- Groq ships new models faster than this list gets updated, so the
+                 dropdown can't be the only way in. Same "Custom…" pattern as the
+                 embedding model control below. -->
+            <input type="text" id="groq-model-custom" placeholder="e.g. llama-3.3-70b-versatile" autocomplete="off" spellcheck="false" hidden>
+            <span class="field-hint">
+              Groq periodically retires models — a saved model that disappears from this list still shows up until you switch it.
+              Anything Groq serves works here. <a href="https://console.groq.com/docs/models" target="_blank" rel="noopener">Current model list &rarr;</a>
+            </span>
+          </div>
+
+          <div class="form-field" id="openrouter-fields">
+            <div class="field-row-between">
+              <label for="openrouter-api-key">OpenRouter API key</label>
+              <a class="field-link" href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get key &nearr;</a>
+            </div>
+            <div class="password-wrap">
+              <input type="password" id="openrouter-api-key" name="openrouter_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
+              <button type="button" class="password-toggle" data-target="openrouter-api-key" aria-label="Toggle visibility"><span class="ms text-[18px]">visibility</span></button>
+            </div>
+            <p class="field-note field-note-muted" id="openrouter-key-status"></p>
+            <label for="openrouter-model" class="form-field-secondary-label">OpenRouter model</label>
+            <input type="text" id="openrouter-model" name="openrouter_model" placeholder="openai/gpt-oss-120b:free">
+            <span class="field-hint">
+              Any model id from OpenRouter's catalogue. Ids ending in <code>:free</code> cost nothing but are limited by
+              <strong>request count, not tokens</strong> — 20/minute and 50/day on an unfunded account (1,000/day after
+              buying $10 of credits). This agent spends roughly 2–3 calls per job that clears the match gate, so 50/day is
+              only ~15–20 jobs. Free ids change over time — if one starts 404ing, pick another.
+              <a href="https://openrouter.ai/models?q=free" target="_blank" rel="noopener">Browse free models &rarr;</a>
+            </span>
+          </div>
         </div>
 
-        <div class="form-field" id="gemini-fields">
-          <label for="gemini-api-key">Gemini API key</label>
-          <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
-          <span class="field-hint" id="gemini-key-status"></span>
-          <a class="field-hint" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free Gemini API key &rarr;</a>
-        </div>
-
-        <div class="form-field" id="groq-fields">
-          <label for="groq-api-key">Groq API key</label>
-          <input type="password" id="groq-api-key" name="groq_api_key" placeholder="Leave blank to keep the current key" autocomplete="off">
-          <span class="field-hint" id="groq-key-status"></span>
-          <a class="field-hint" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a free Groq API key &rarr;</a>
-          <label for="groq-model" class="form-field-secondary-label">Groq model</label>
-          <select id="groq-model" name="groq_model">
-            <option value="openai/gpt-oss-120b">openai/gpt-oss-120b — large, recommended default</option>
-            <option value="openai/gpt-oss-20b">openai/gpt-oss-20b — smaller, faster</option>
-            <option value="qwen/qwen3.6-27b">qwen/qwen3.6-27b — alternative general-purpose (preview)</option>
-            <option value="groq/compound">groq/compound — agentic, built-in web search/code exec</option>
-            <option value="groq/compound-mini">groq/compound-mini — smaller agentic variant</option>
-          </select>
-          <span class="field-hint">
-            Groq periodically retires models — if a saved model disappears from
-            this list it still shows up (added automatically) until you switch it.
-            <a href="https://console.groq.com/docs/models" target="_blank" rel="noopener">Current model list &rarr;</a>
-          </span>
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Save</button>
-          <span id="save-message" class="save-message"></span>
+        <div class="flex flex-wrap items-center justify-end gap-3">
+          <div class="mr-auto"><span id="save-message" class="save-message"></span></div>
+          <button type="submit" class="sa-btn-primary"><span class="ms text-[18px]">save</span>Save changes</button>
         </div>
       </form>
-
-      <p class="note">
-        Saved to <code>.env</code> on the machine running the API. Takes effect
-        immediately for the dashboard API itself; the scheduler runs as a
-        separate process and needs a restart (close and re-run
-        <code>run.bat</code> / <code>run_conda.bat</code>) to pick up changes.
-      </p>
     </section>
-  </main>
 
-</div>
+    <!-- ================= Matching ================= -->
+    <section class="sa-card scroll-mt-36 md:p-8" id="matching">
+      <div class="mb-6 flex items-start gap-3">
+        <span class="sa-icon-badge bg-secondary-container/70 text-secondary"><span class="ms">hub</span></span>
+        <div>
+          <h2 class="text-headline-md font-bold text-on-surface">Job Matching</h2>
+          <p class="text-body-sm text-on-surface-variant">How jobs are found and ranked before the agent scores them.</p>
+        </div>
+      </div>
 
+      <form id="matching-form" class="flex flex-col gap-4">
+        <label class="toggle-row rounded-2xl bg-surface-container-low p-5">
+          <span class="toggle-text">
+            <span class="toggle-title">Search-only mode (debugging)</span>
+            <span class="toggle-desc">Runs expansion → retrieval → semantic matching → ranking → match gate, writes the debug report, and stops. No ATS scoring, no CV rewriting, no apply decisions, and <strong>nothing is saved to the database</strong> — about one LLM call plus embeddings instead of 2–4 per job.</span>
+          </span>
+          <span class="toggle-switch">
+            <input type="checkbox" id="toggle-search-only">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </span>
+        </label>
+
+        <label class="toggle-row rounded-2xl bg-surface-container-low p-5">
+          <span class="toggle-text">
+            <span class="toggle-title">Query expansion</span>
+            <span class="toggle-desc" id="expansion-toggle-desc">Widens your search to equivalent job titles so postings worded differently aren't missed.</span>
+          </span>
+          <span class="toggle-switch">
+            <input type="checkbox" id="toggle-query-expansion">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </span>
+        </label>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div class="form-field rounded-2xl bg-surface-container-low p-5">
+            <label for="expansion-max-roles">Max expanded roles</label>
+            <input type="number" id="expansion-max-roles" min="1" max="20" step="1" class="!bg-surface-container-lowest">
+            <span class="field-hint">Your typed Position is always included on top of these.</span>
+          </div>
+          <div class="form-field rounded-2xl bg-surface-container-low p-5">
+            <label for="serpapi-expansion-limit">SerpAPI phrase limit</label>
+            <input type="number" id="serpapi-expansion-limit" min="0" max="10" step="1" class="!bg-surface-container-lowest">
+            <span class="field-hint">SerpAPI's free tier is 100 searches a month and each phrase is one search — only this many are sent to SerpAPI (every other source gets the full list). 0 skips SerpAPI.</span>
+          </div>
+        </div>
+
+        <div class="form-field rounded-2xl bg-surface-container-low p-5">
+          <label for="embedding-provider">Embedding provider</label>
+          <div class="sa-select-wrap">
+            <select id="embedding-provider" class="w-full !bg-surface-container-lowest">
+              <option value="ollama">Ollama — local, free, no quota</option>
+              <option value="gemini">Google Gemini — hosted free tier (uses your Gemini key)</option>
+            </select>
+          </div>
+          <span class="field-hint">Compares your CV to job descriptions semantically — how a "Backend Developer" posting that fits you surfaces even though its title doesn't match. Separate from the LLM provider because Groq has no embeddings API. Ollama needs <code>ollama pull nomic-embed-text</code> once.</span>
+          <label for="embedding-model-select" class="form-field-secondary-label">Embedding model</label>
+          <!-- A real <select> rather than input+datalist: a datalist renders as a
+               plain text box with no chevron, so there's nothing telling you
+               options exist. The "Custom" entry keeps arbitrary model ids reachable. -->
+          <div class="sa-select-wrap">
+            <select id="embedding-model-select" class="w-full !bg-surface-container-lowest">
+              <option value="__custom__">Custom&hellip;</option>
+            </select>
+          </div>
+          <input type="text" id="embedding-model" placeholder="qwen3-embedding:4b" class="!bg-surface-container-lowest" hidden>
+          <span class="field-hint" id="embedding-model-note"></span>
+          <span class="field-hint" id="embedding-model-hint"></span>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div class="form-field rounded-2xl bg-surface-container-low p-5">
+            <label for="similarity-threshold">Semantic match threshold</label>
+            <div class="threshold-input-wrap">
+              <input type="number" id="similarity-threshold" min="1" max="100" step="1" class="!bg-surface-container-lowest">
+              <span class="threshold-input-suffix">%</span>
+            </div>
+            <span class="field-hint">How similar a description must be to your CV for a job whose <em>title</em> didn't match to still be considered. Lower = more jobs, more noise. The default is a starting estimate worth tuning.</span>
+          </div>
+          <div class="form-field rounded-2xl bg-surface-container-low p-5">
+            <label for="match-score-threshold">Minimum match score</label>
+            <div class="threshold-input-wrap">
+              <input type="number" id="match-score-threshold" min="0" max="100" step="1" class="!bg-surface-container-lowest">
+              <span class="threshold-input-suffix">%</span>
+            </div>
+            <span class="field-hint">Jobs below this skip ATS scoring and CV rewriting entirely. <strong>0 disables the gate.</strong> Raise it only once you've seen real match scores.</span>
+          </div>
+        </div>
+
+        <div class="mt-2 flex flex-wrap items-center justify-end gap-3">
+          <button type="button" id="clear-expansion-cache" class="sa-btn mr-auto"><span class="ms text-[18px]">delete_sweep</span>Clear expansion cache</button>
+          <span id="matching-save-message" class="save-message"></span>
+          <button type="submit" class="sa-btn-primary"><span class="ms text-[18px]">save</span>Save changes</button>
+        </div>
+      </form>
+    </section>
+  </div>
+</main>
+
+<script src="shell.js"></script>
 <script src="config.js"></script>
 <script src="settings.js"></script>
 </body>

@@ -66,15 +66,35 @@ The main pipeline. `run_daily_search_and_apply()`:
    keeps a manual `python jobs/daily_run.py` run, the 8am scheduler run, and
    the dashboard's "Search now" button all searching the same thing without
    three separate config paths.
-4. Calls `agents.search_agent.run_search(...)`, which returns
-   `(found_jobs, source_errors)` — a flat list of raw job dicts from every
-   configured source, and a list of any individual sources that failed
-   (a dead Lever slug, a network timeout) without aborting the rest.
-5. For each raw job with a URL, `_process_one_job()` handles dedupe and
+4. **Query expansion.** `agents.query_expansion_agent.get_target_roles()`
+   widens the typed Position into the set of equivalent role titles (cached;
+   degrades to `[position]` if the LLM is unavailable).
+5. **Retrieval.** `agents.search_agent.run_search(..., target_roles=...)`
+   returns `(found_jobs, source_errors)` — a flat, URL-deduplicated list of
+   raw job dicts from every configured source, plus any individual sources
+   that failed (a dead Lever slug, a network timeout) without aborting the rest.
+6. **`_drop_already_known()`** removes jobs whose URL is already in the `Job`
+   table. `run_search()` has no memory across runs, so a daily schedule
+   re-fetches the same postings every morning — without this, embeddings,
+   skill extraction and ranking would all be paid for again on jobs that are
+   about to be discarded as duplicates at INSERT time anyway.
+7. **`_rank_candidates()`** runs the semantic retrieval path over the
+   token-path misses only, unions the two, and ranks the result (see
+   `agents/ranking_agent.py`). Every step degrades gracefully: if embeddings
+   are unavailable (no local Ollama, no Gemini key) the run continues with
+   token-retrieved jobs and no semantic factor, rather than failing.
+8. **The match-score gate.** Jobs below `config.MATCH_SCORE_THRESHOLD` skip
+   the orchestrator's per-job LLM pipeline entirely. **Off by default (0.0)**
+   — a non-zero default would silently discard jobs against a threshold
+   nobody has calibrated, the same failure mode as this project's earlier
+   over-filtering bugs. The count held back is *reported*, so a too-high
+   threshold looks like "N below match threshold" rather than "found nothing".
+9. For each surviving job with a URL, `_process_one_job()` handles dedupe and
    persistence — see below.
-6. Returns `{"processed": [...], "errors": [...], "found": N,
-   "source_errors": [...]}` — printed to stdout when run from the CLI,
-   returned as JSON when triggered from `api.py`.
+10. Returns `{"processed": [...], "errors": [...], "found": N,
+    "source_errors": [...], "target_roles": [...], "new_after_dedup": N,
+    "ranked": N, "skipped_low_match": N}` — printed to stdout when run from
+    the CLI, returned as JSON when triggered from `api.py`.
 
 **`_process_one_job(raw_job, cv_text)`** is split into three short,
 independent transactions rather than one transaction spanning the whole
@@ -176,37 +196,64 @@ a chain of nested if/else calls, mainly so the flow is inspectable and
 easy to extend with new branches later without restructuring the whole thing.
 
 ```
-        score
-          │
-   ats score < 0.7?
-     ┌────┴────┐
-    yes         no
-     │           │
- rewrite_cv   decide_apply_path
-     │           │
-    END     ┌────┴────┐
-        auto_submit  draft_for_review
-             │           │
-            END         END
+                    score
+                      │
+         ats score < FIT_THRESHOLD (0.7)?
+             ┌────────┴────────┐
+            yes                 no
+             │                   │
+         rewrite_cv        decide_apply_path
+             │                   │
+   tailored score clears   ┌─────┴─────┐
+   FIT_THRESHOLD AND        auto_submit  draft_for_review
+   AUTO_APPLY_ON_               │             │
+   TAILORED_SCORE?             END           END
+      ┌────┴────┐
+     yes         no
+      │           │
+ decide_apply_path  END
+  (see right branch)
 ```
 
+`FIT_THRESHOLD` (default `0.7`) and `AUTO_APPLY_MODE` (`"off"` /
+`"any"` / `"whitelist"`, default `"whitelist"`, checked inside
+`decide_apply_path`) are both user-configurable from the Settings page's
+"Auto-Apply Behavior" panel — see the `decide_apply_path_node` and
+`route_on_score`/`route_after_rewrite` bullets below.
+
 State (`orchestrator.State`, a `TypedDict`): `job`, `cv_text`, `ats_result`,
-`cv_rewritten`, `cv_path`, `apply_path`, `status`, `result`. Each node
-function takes the state dict, mutates it, and returns it.
+`cv_rewritten`, `cv_path`, `tailored_ats_result`, `tailored_ats_explanation`,
+`apply_path`, `status`, `result`. Each node function takes the state dict,
+mutates it, and returns it.
 
 - **`score_node`** calls `agents.ats_agent.compute_ats_score(cv_text,
   job_description)` and stores the result.
 - **`route_on_score`** — the conditional edge — sends the job to
-  `rewrite_cv` if `ats_result["score"] < FIT_THRESHOLD` (0.7, a module
-  constant), otherwise to `decide_apply_path`. This is the one place that
-  threshold lives; there's no dashboard control for it currently.
+  `rewrite_cv` if `ats_result["score"] < config.FIT_THRESHOLD` (default
+  `0.7`), otherwise to `decide_apply_path`. `FIT_THRESHOLD` is
+  user-configurable from the Settings page's "Auto-Apply Behavior" panel,
+  read fresh at call time (not cached), so a change applies to the next job
+  scored — no restart needed.
 - **`rewrite_node`** (only reached on low fit) calls
-  `agents.cv_rewriter_agent.rewrite_cv()` then `save_cv_as_pdf()`, writes
-  the output to `cv_output/cv_<job_id>.pdf`, and sets
-  `status = "cv_rewritten_notify_user"`. The graph ends here deliberately —
-  **a low-fit job is never auto-applied to**, even with the rewritten CV;
-  it's surfaced to the user (via the Dashboard/CV tab) instead.
-- **`decide_apply_path_node`** (only reached on good fit) calls
+  `agents.cv_rewriter_agent.rewrite_cv()` — passing the hand-edited profile
+  from `profile_store`, falling back to the extraction the scoring pass
+  already built — then `save_cv_as_pdf()`, writes the output to
+  `cv_output/cv_<job_id>.pdf`, re-scores `render_cv_text()`'s flattening of
+  the same document via a second `compute_ats_score()` call, and sets
+  `status = "cv_rewritten_notify_user"`.
+- **`route_after_rewrite`** — a second conditional edge, opt-in via
+  `config.AUTO_APPLY_ON_TAILORED_SCORE` (Settings page toggle, **off by
+  default**). When off (the original, still-default behavior), the graph
+  always ends here — **a low-fit job is never auto-applied to**, even with
+  the rewritten CV; it's surfaced to the user (via the Dashboard/CV tab)
+  instead. When on, a tailored CV whose re-scored `tailored_ats_result`
+  clears `config.FIT_THRESHOLD` is routed to `decide_apply_path` — the same
+  gate a naturally good-fit job goes through, so a rewritten CV still can't
+  bypass whatever `config.AUTO_APPLY_MODE` currently allows. A tailored CV
+  that still doesn't clear the threshold always ends here regardless of the
+  flag.
+- **`decide_apply_path_node`** — reached either from a good-fit job
+  directly, or from `rewrite_cv` via `route_after_rewrite` above — calls
   `agents.apply_agent.decide_apply_path(job)`.
 - **`route_on_apply_path`** sends the job to `auto_submit` or
   `draft_for_review` based on that decision.
@@ -217,8 +264,9 @@ function takes the state dict, mutates it, and returns it.
   stub that raises `NotImplementedError` until someone hand-verifies a
   specific board's form fields and implements the real submit payload (see
   [Enabling auto-submit](README.md#enabling-auto-submit) in the README).
-  Reaching this node at all already implies the job's source was in
-  `WHITELISTED_SOURCES`, since `decide_apply_path` gates on that.
+  Reaching this node at all already implies `decide_apply_path` approved it
+  — `config.AUTO_APPLY_MODE` is `"any"`, or is `"whitelist"` and the source
+  is in `WHITELISTED_SOURCES`.
 - **`draft_node`** calls `agents.apply_agent.draft_for_review()`, which just
   packages the job URL, CV path, and an empty cover letter into a dict with
   `status = "pending_review"` — this is what shows up in the Dashboard's
@@ -245,10 +293,19 @@ anywhere else. Three providers, selected by `config.LLM_PROVIDER`:
 |---|---|---|
 | `ollama` (default) | `ChatOllama` | Local, free, needs `ollama serve` running + the model pulled. |
 | `gemini` | `ChatGoogleGenerativeAI` | Hosted, free tier, needs `GEMINI_API_KEY`. Model hardcoded to `gemini-1.5-flash`. |
+| `openrouter` | `ChatOpenRouter` | One key in front of ~400 models with automatic cross-provider failover. Needs `OPENROUTER_API_KEY`. **Its free tier is metered differently from every other provider here:** model ids ending in `:free` are capped by *request count*, not tokens — 20/minute and 50/**day** on an unfunded account (1,000/day after $10 of credits). The orchestrator spends ~2–3 calls per job that clears the match gate, so 50/day is roughly 15–20 jobs. Paid ids have no request cap. Free ids also come and go, so a 404 means picking another from OpenRouter's catalogue. `max_tokens=4096` and the `gpt-oss` `reasoning_effort` handling mirror the Groq row below, since the underlying models are the same. Uses the dedicated `langchain-openrouter` package rather than the older `ChatOpenAI` + `base_url` override, which needs `langchain-openai` and loses OpenRouter's routing metadata. |
 | `groq` | `ChatGroq` | Hosted, free tier, fastest of the three. Needs `GROQ_API_KEY`. `max_tokens=4096` is set explicitly — without a cap, a long prompt (full CV + job description) can exhaust Groq's default token budget before emitting any content. For `gpt-oss` models specifically, `reasoning_effort="low"` is also set, because those models bill hidden internal reasoning as completion tokens — verified directly that a trivial 2-line rewrite spent ~85% of its budget on invisible reasoning before this flag was added, sometimes returning `content=""` with `finish_reason="length"` and no error. |
 
-All three are switchable live from the dashboard's Settings page as well as
+All four are switchable live from the dashboard's Settings page as well as
 `.env` (see `env_store.py` and `api.py`'s `/api/settings` endpoint).
+
+Note the two hosted providers fail in opposite ways under load, which is
+worth knowing when choosing between them for this workload: Groq runs out of
+**tokens per day** (200k on the free tier — a single 250-job run once spent
+~197k of it), while OpenRouter's free ids run out of **requests per day**
+(50 unfunded). Token budgets favour many small calls; request budgets favour
+few large ones. Ranking being LLM-free (see `agents/ranking_agent.py`) is
+what keeps either from being hit by ordinary search volume.
 
 ### `agents/search_agent.py` — pulling jobs from every configured source
 
@@ -399,70 +456,555 @@ on `_filter_relevant`):
 in `apply_agent.py`) since it's fundamentally about what a *source* can
 support, not about apply-path decision logic — `apply_agent.py` imports it.
 
+### `agents/query_expansion_agent.py` — one Position → many role titles
+
+`get_target_roles(position, cv_text)` turns one typed Position ("AI Engineer")
+into the set of job titles that describe the same kind of role ("Machine
+Learning Engineer", "Generative AI Engineer", "AI Software Engineer", …).
+One LLM call, cached per Position string in `models.QueryExpansionCache`.
+
+Why an LLM rather than a static title taxonomy, a hand-written synonym dict,
+or embedding nearest-neighbors over a known-titles list: the expansions that
+matter most are recent and compound role names ("Agentic AI Engineer", "Gen
+AI Engineer") that pre-built taxonomies and models trained on older job
+corpora are structurally bad at surfacing.
+
+Three properties worth knowing:
+
+- **The typed Position is always first and never dropped**, so expansion can
+  only ever *widen* a search, never redirect it to the model's paraphrases of
+  what the user asked for.
+- **It's CV-aware.** Expanding "AI Engineer" generically gives generic
+  synonyms; expanding it alongside a CV mentioning PyTorch and agent
+  orchestration gives a list calibrated to that candidate. The CV hash is
+  stored with the cache entry, so a materially different CV re-expands.
+- **Every failure degrades to `[position]`** — an unreachable LLM,
+  unparseable output, or `SEARCH_QUERY_EXPANSION=false` all fall back to
+  exactly the pre-expansion behavior rather than failing the search run.
+
+### `agents/embeddings.py` — CV ↔ job-description similarity
+
+Deliberately a *separate* provider switch from `agents/llm.py`
+(`config.EMBEDDING_PROVIDER`, not `LLM_PROVIDER`): Groq — one of the three
+chat providers — has no embeddings endpoint at all, so a user on
+`LLM_PROVIDER=groq` still needs an independent choice. `ollama` (default,
+`qwen3-embedding:4b`, free forever, needs a one-time `ollama pull`) or
+`gemini` (`gemini-embedding-001`, hosted free tier).
+
+**Why `qwen3-embedding:4b`** over the obvious alternatives, for *this*
+project specifically: 40K context and 100+ languages at 2.5 GB.
+`nomic-embed-text` has ample context (8K) but is English-centric, and this
+agent scrapes MENA boards (Wuzzuf, Bayt, GulfTalent) whose postings are
+frequently Arabic or mixed-language — an English-only embedder scores those
+near-randomly. `embeddinggemma:300m` is multilingual and tiny but capped at
+2K context, and measured against this project's own stored jobs the 90th
+percentile description is already ~1.9k tokens (longest ~2.2k), with the
+generic scraper's whole-page text running far longer.
+
+**Query-side instruction prefix.** Qwen3-Embedding is trained to take a task
+instruction on the query only (`Instruct: {task}\nQuery: {text}`), with the
+corpus embedded bare. Here the CV is the query — we're retrieving job
+postings that match it — so `embed_cv()` applies
+`config.EMBEDDING_QUERY_INSTRUCTION` and `embed_texts()` (job descriptions)
+does not. This is plain string formatting done before the text reaches the
+provider, which is why the feature needs no `transformers`/`torch`
+dependency; `supports_instruction_prefix()` gates it to models actually
+trained this way, since prepending it elsewhere would just add noise. The
+instruction is part of the CV cache key, so editing the wording re-embeds.
+
+**On the Gemini model name:** `text-embedding-004` was shut down on
+2026-01-14 (and `embedding-001` on 2025-08-14); both now return
+`404 NOT_FOUND` from `embedContent`. `gemini-embedding-001` is the
+documented text-only replacement — `gemini-embedding-2` is the newer
+multimodal model, unnecessary here since this only ever embeds plain text.
+`active_model()` normalizes away a `models/` prefix, since both shapes appear
+in Google's own docs and they must not produce two different cache keys for
+the same model.
+
+**Rate limits are handled, not just reported.** Gemini's free tier meters
+embeddings per *minute* (`EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier`,
+100) and counts each content in a batch against it, so a run over a few
+hundred job descriptions trips it. Two things keep that from killing the
+semantic stage:
+
+- `embed_texts` chunks at `config.EMBEDDING_BATCH_SIZE` (100, the API's own
+  batch cap) and retries a rate-limited chunk after the delay **the API
+  itself specifies** (`"Please retry in 18.049973242s"` / `retryDelay`),
+  plus 1s of headroom — retrying at the exact boundary tends to race the
+  server's window accounting and trip a second 429. Retries are bounded
+  (4), so a genuinely exhausted *daily* quota surfaces as a real failure
+  instead of stalling a run forever on a limit that won't clear.
+- `ranking_agent.attach_semantic_scores()` embeds every job needing a score
+  in **one batched pass** before the scoring loop. `score_job` previously
+  embedded each job individually — one HTTP request per job, which is what
+  exhausted the quota. Measured: ranking 200 jobs went from 200 requests to 2.
+
+**The CV embedding cache is keyed on CV text + provider + model**, not text
+alone. This matters more than it looks: models emit different
+dimensionalities (`nomic-embed-text` 768, `gemini-embedding-001` 3072), and
+`cosine_similarity` returns `0.0` on a length mismatch rather than raising —
+so a text-only cache key would, after any provider or model switch, silently
+score every job `0.0` on the semantic factor and rescue nothing, with no
+error anywhere to explain why. The cached entry also records the provider,
+model, and dimension count so a stale file is diagnosable by reading it.
+
+`cosine_similarity()` is plain Python rather than numpy, and there's no vector
+database: this app compares one CV against tens-to-low-hundreds of jobs per
+run, nowhere near the scale that would justify FAISS/Chroma or a numpy
+dependency the project doesn't otherwise have. Raw cosine ranges −1..1 but is
+clamped to 0..1 so it's directly comparable to every other score here.
+
+`embed_cv()` caches the CV's embedding in `data/cv_embedding_cache.json`,
+keyed by a hash of the CV *text* — so replacing the CV invalidates it
+automatically, with no explicit "clear cache" step. Only the current CV's
+entry is kept; the file is rewritten wholesale rather than accumulating every
+CV ever embedded.
+
+### `agents/ranking_agent.py` — "is this job right for ME?"
+
+The precision half of the two-stage matching pipeline, and a deliberately
+*different question* from `ats_agent.py`'s score. That one asks "would my CV,
+as written, survive **this employer's** ATS parser". This one asks "is this
+job worth my time applying to" — and looks at signals the ATS score never
+considers at all (location, salary, education, seniority). A job can score
+well on one and badly on the other.
+
+**Two entry points, matching the two stages:**
+
+- **`semantic_retrieval_path(jobs, cv_embedding)`** (retrieval) — jobs whose
+  *description* is semantically close to the CV regardless of title, above
+  `config.CV_JOB_SIMILARITY_THRESHOLD`. This is what catches a "Backend
+  Developer" posting for a "Software Engineer" search when the JD content
+  genuinely fits — something the title-token path structurally cannot do.
+  Callers pass only the jobs the token path **rejected** (`split_by_token_match`
+  does that partition): re-embedding a job the token filter already accepted
+  would spend a call confirming a decision that's already made, since the two
+  paths are unioned anyway.
+
+  **This only works because `run_search(include_title_mismatches=True)` keeps
+  those jobs alive.** The first implementation didn't, and the semantic path
+  was silently dead weight — `run_search`'s own title filter had already
+  discarded every job the semantic retriever exists to rescue, so it could
+  never recover anything. Caught by the very first debug report (zero
+  `semantic` rows on the Retrieval sheet). Title mismatches are now carried
+  forward, capped globally at `config.SEMANTIC_CANDIDATE_CAP` (default 200)
+  since a single Greenhouse board can return 500+ jobs and each candidate
+  costs an embedding call. Seniority mismatches are still dropped outright —
+  that filter stays hard.
+- **`rank_jobs(...)`** (ranking) — scores every candidate and returns them
+  sorted best-first. It never drops anything; gating on
+  `config.MATCH_SCORE_THRESHOLD` is the caller's decision (`jobs/daily_run.py`),
+  kept separate so ranking stays a pure transformation.
+
+**Ranking is LLM-free, deliberately.** It runs over *every* retrieved
+candidate — hundreds per run — so an LLM call per job isn't affordable:
+measured, a 250-job run consumed ~197k of Groq's 200k free-tier daily token
+budget, all spent ranking jobs that mostly never get applied to. The skills
+factor therefore inverts the question: instead of "what does this JD require,
+and do I have it" (needs a model to read the JD), it asks "which of *my*
+skills does this JD mention" — computable by intersecting the CV's own
+vocabulary (`extract_cv_skill_terms`, which prefers an explicit `Skills:`
+section) with the JD text. For "is this job right for me" that framing is
+arguably the more direct one anyway. Real LLM extraction still happens once
+per job in `ats_agent.py`, for the far smaller set that reaches the
+orchestrator — and if a caller already has that list, `score_skills` accepts
+it and uses the stronger measure instead.
+
+**Embeddings are budgeted per run.** Gemini's free tier meters them at 100
+per *minute* counted **per job description**, not per HTTP request — so
+batching alone cannot get under it. Two limits apply together, and both
+default **provider-aware** (an explicit `.env` value always wins):
+`SEMANTIC_CANDIDATE_CAP` (90 on Gemini / 400 on Ollama) bounds the rescue
+path, and `EMBEDDING_MAX_PER_RUN` (95 / 500) bounds the run as a whole,
+because the
+token-matched jobs need embedding too and the two together can exceed the
+quota even when each is individually under it. Discovery gets first claim on
+the budget (the semantic path finds jobs nothing else would); token-matched
+jobs that miss out score neutral on that one factor, since they're already
+known relevant by title. Nothing is ever dropped, and whatever was skipped is
+recorded in the debug report. `rank_jobs` deliberately passes
+`cv_embedding=None` into `score_job` for exactly this reason — leaving it set
+re-enables a per-job embedding fallback that sails straight past the budget
+(measured: a 95-embedding budget became 250 actual embeddings).
+
+**Factor weights** — semantic similarity takes 20%, and the seven rule-based
+factors keep their relative proportions scaled into the remaining 80%:
+
+| Factor | Weight | Notes |
+|---|---|---|
+| Semantic CV/JD similarity | 20% | Reused from retrieval when already computed |
+| Skills match | 32% | Reuses `ats_agent.extract_required_skills` / `keyword_overlap_score` |
+| Experience match | 16% | Reuses `ats_agent`'s years extraction |
+| Job title match | 12% | Token match against `target_roles` |
+| Location | 8% | Remote-only sources score full; Greenhouse's nested location object is read |
+| Education | 4% | Highest degree in CV vs. stated requirement |
+| Salary | 4% | Rewards *disclosure* — without a configured target figure, that's the only honest signal |
+| Seniority | 4% | Title vs. the configured level |
+
+**Missing data scores NEUTRAL (0.5), never zero.** Location and salary are
+absent from most of this project's sources — the generic scraper and job-board
+templates usually yield only a title and raw page text, with no structured
+salary field at all — so scoring "not stated" as 0 would systematically punish
+jobs for how their *source* happens to be structured rather than for anything
+about the job. Every factor reports whether its data was actually found.
+
+### `agents/search_trace.py` — per-run Excel debug reports
+
+Records what happened at every pipeline stage and writes it to a timestamped
+`.xlsx` under `data/search_reports/` (config: `SEARCH_DEBUG_REPORTS`,
+`SEARCH_REPORT_DIR`, `SEARCH_REPORT_KEEP`). Eight sheets:
+
+| Sheet | Contents |
+|---|---|
+| Summary | Run metadata, the settings in force, and the whole funnel — raw → filtered → deduped → ranked → processed |
+| Query Expansion | Every role phrase searched, and whether it came from the LLM or the cache |
+| Sources | Per source *and per expanded phrase*: raw returned, surviving each filter, dropped by filter vs. by cap, seconds, error |
+| Retrieval | Every job seen, which path handled it (token / semantic / role1), kept or dropped, and the reason |
+| Ranking | Every candidate × every factor: raw score, weight, weighted contribution, and the evidence string |
+| Match Gate | Each ranked job's score against the threshold, processed or held back |
+| Source Errors | Every failed source with its exception |
+| Stage Timings | Wall-clock seconds per stage |
+
+Two rules this module follows strictly. **Tracing never changes behavior** —
+a `NullTrace` makes every call a no-op when reporting is off, the stage timer
+never swallows an exception, and a failed report write is caught and logged
+rather than failing a search run that already did its real work. And **the
+Summary sheet's counts are formulas, not Python-computed literals**
+(`COUNTIFS(Retrieval!...)` etc., with `fullCalcOnLoad` set so Excel evaluates
+them on open), so filtering a detail sheet doesn't leave a stale number behind.
+
+This report earned its keep immediately: the first one generated showed *zero*
+rows on the `semantic` path, which is what surfaced the recall bug described
+under `include_title_mismatches` below.
+
 ### `agents/ats_agent.py` — scoring fit
 
-`compute_ats_score(cv_text, job_description)` is the entry point the
-orchestrator's `score_node` calls. It's a 50/50 hybrid of two independently
-computed scores, on the stated theory that keyword overlap mirrors how real
-ATS systems filter, while an LLM call captures context/seniority fit that
-keyword matching alone would miss:
+`compute_ats_score(cv_text, job_description, required_skills=None)` is the
+entry point the orchestrator's `score_node` calls (and, separately, the
+entry point `rewrite_node` calls a second time to re-score a tailored CV —
+see below). It scores four independently-computed, weighted pillars rather
+than a single hybrid number, modeled directly on how real-world ATS
+scoring is broken down: **Keyword Match (45%)**, **Formatting &
+Parsability (22%)**, **Section Completeness (18%)**, and **Experience
+Alignment (15%)** — each weight sits inside the range that research into
+real ATS scoring reports for that pillar (`agents/ats_agent.py::WEIGHTS`,
+asserted to sum to 1.0 at import time).
 
-1. **`extract_required_skills()`** — one LLM call asking for a JSON array of
-   required/preferred skills from the job description. `_safe_json_list()`
-   regex-extracts a `[...]` block from the response even if the model wraps
-   it in prose or a code fence, and falls back to an empty list on a parse
-   failure rather than raising.
-2. **`keyword_overlap_score()`** — deterministic: fraction of the extracted
-   skills that appear as a substring in the (lowercased) CV text. `0.0` if
-   no skills were extracted.
-3. **`llm_fit_score()`** — a second LLM call asking for a single 0–1 number
-   representing overall fit (given the full CV and job description text
-   together). Regex-extracts the first number found in the response;
-   defaults to `0.5` if nothing parses.
-4. Final score: `0.5 * keyword_score + 0.5 * llm_score`. Returns a dict with
-   `score`, `keyword_score`, `llm_score`, `missing_skills` (extracted skills
-   not found in the CV — this is what feeds both the rewriter and the
-   Skill Gap tracking), and `required_skills`.
+1. **Keyword Match** — `extract_required_skills()` (one LLM call asking for
+   a JSON array of required/preferred skills from the JD; `_safe_json_list()`
+   regex-extracts a `[...]` block even if the model wraps it in prose or a
+   code fence, falling back to an empty list on a parse failure) feeds
+   `keyword_overlap_score()`, the deterministic fraction of those skills
+   that appear as a substring in the (lowercased) CV text.
+2. **Formatting & Parsability** — fully deterministic, no LLM call.
+   `formatting_score()` can't inspect the original file's layout (columns,
+   tables, fonts) since `cv_text` has already been flattened to plain text
+   by `cv_parser` before scoring ever runs; instead it checks signals that
+   correlate with clean, parser-friendly formatting: standard section
+   headers presented as short, distinct lines (`_header_like_lines()`), a
+   healthy 150–1200 word length, and consistent bullet usage (3+ bulleted
+   lines). Returns specific issues (e.g. "CV text is short (91 words)") for
+   the explanation, not just a number.
+3. **Section Completeness** — also deterministic. `section_completeness_score()`
+   checks for the *content* five standard sections should contain — contact
+   info (email/phone regex), a summary/objective, dated work experience
+   (2+ four-digit years or "present"), an education section (degree
+   keywords like "bachelor"/"university"), and a skills section (the word
+   "skill(s)" anywhere) — deliberately distinct from formatting's
+   header-line check, since a CV can have real content without a perfectly
+   labeled header, or a clean header with nothing behind it.
+4. **Experience Alignment** — `experience_alignment_score()` blends
+   `llm_fit_score()` (a second LLM call, unchanged from the original
+   design: asks for a single 0–1 overall-fit number given the full CV and
+   JD) with a best-effort years-of-experience check: `_extract_required_years()`
+   regexes for a number like "5+ years" near the word "experience" in the
+   JD, `_estimate_cv_experience_years()` spans the earliest-to-latest
+   4-digit year mentioned anywhere in the CV as a rough proxy for career
+   length. If the JD states no number, or the CV has no years at all, this
+   pillar is just the LLM score; otherwise it's `0.7 * llm_score + 0.3 *
+   years_ratio`.
 
-Two LLM calls per job scored is the main cost driver of a search run — this
-is why "Max results per site" exists on the Search tab, to bound how many
-jobs get this treatment in one run.
+The final `score` is the weighted sum of the four pillar scores. The
+returned dict keeps `keyword_score`/`llm_score`/`missing_skills`/
+`required_skills` for backward compatibility with existing callers, and
+adds `breakdown` (per-pillar score/weight/evidence) and `explanation` — a
+plain-English, fully deterministic (no extra LLM call)
+`build_score_explanation()` rendering of the breakdown, e.g. "Keyword
+Match — 58% (weight 45%): matched 7 of 12 required skills... Missing:
+Kubernetes, Terraform." This is what the Dashboard shows under every
+application's "Why?" link — see
+[Explaining and re-scoring the tailored CV](#explaining-and-re-scoring-the-tailored-cv) below.
+
+Two LLM calls per job scored (skill extraction + fit judgment) is the main
+cost driver of a search run — this is why "Max results per site" exists on
+the Search tab, to bound how many jobs get this treatment in one run. A
+low-fit job that goes through the CV rewrite path costs one more LLM call
+than before (see below) to re-score the tailored CV's contextual fit.
+
+#### Explaining and re-scoring the tailored CV
+
+`orchestrator.py::rewrite_node` calls `compute_ats_score()` a second time,
+against the freshly rewritten CV text and the same job description — but
+passes `required_skills=state["ats_result"]["required_skills"]` through
+from the original score, so this second call skips the skill-extraction
+LLM call (the JD hasn't changed) and only pays for a fresh
+`llm_fit_score()` call. The result is stored as `tailored_ats_result`
+alongside a `tailored_ats_explanation` built by
+`build_improvement_explanation()` — another fully deterministic,
+no-LLM-call function that diffs the two breakdowns pillar by pillar and
+calls out which previously-missing skills the rewrite was able to
+incorporate (by comparing `missing_skills` before and after — never by
+asking the LLM to explain itself, since that could invent a justification
+that doesn't match what the rewrite actually did). Both `ats_result` and
+`tailored_ats_result` flow through to `jobs/daily_run.py::_finalize_job`,
+which persists all five new `Application` columns
+(`ats_breakdown`/`ats_explanation`/`tailored_ats_score`/
+`tailored_ats_breakdown`/`tailored_ats_explanation`) — `ats_*` is set for
+*every* application (`score_node` runs unconditionally before the
+rewrite/auto-submit/draft branch), while `tailored_*` stays `NULL` unless
+that job went through the rewrite path.
+
+#### The requirements-based scoring engine — the only one
+
+Everything above describes the four-pillar scorer, which was **removed on
+2026-08-26**. `compute_requirements_score()` is what the scheduler, the
+dashboard and the bench all run: structured requirement extraction against
+the job description, the user's stored profile as the evidence source,
+deterministic evidence matching (exact/alias/subset, plus a guarded
+batched-LLM entailment pass for anything unmatched), and a deterministic
+weighted score — with ATS parse-compatibility split out as its own CV-only
+Pass/Warning/Fail check rather than folded into the per-job number.
+`compute_ats_score()` is now a thin name over it, kept because every caller
+reaches scoring through it.
+
+Removed with the engine: `config.SCORING_ENGINE`, the bench's engine
+selector and its side-by-side comparison, `keyword_overlap_score`,
+`llm_fit_score`, `_estimate_cv_experience_years` and the pillar weights.
+Kept, because they answer questions that are still asked:
+`formatting_score()` and `section_completeness_score()` now feed only
+`compute_ats_compatibility()`, and `_extract_required_years()` still reads
+"5+ years" out of a posting for the ranking stage.
+
+Two consequences live outside `ats_agent.py`:
+
+- **`Application.scoring_engine`** records which engine produced each row's
+  `ats_score`/`ats_breakdown`. `NULL` on pre-cutover rows means legacy (the
+  API defaults it), and `frontend/why-modal.js` still renders those rows —
+  labelled on screen as scored by a retired engine and not comparable with
+  newer numbers. The breakdowns have incompatible shapes, and a legacy row
+  read under the requirements renderer renders *empty* rather than erroring,
+  which is the kind of thing nobody notices for weeks.
+- **`orchestrator._rescore_kwargs()`** decides what the tailored-CV re-score
+  reuses: the whole structured extraction (a flat list of names silently fails its
+  `extracted.get("requirements")` check and triggers a re-extraction), the
+  already-built CV profile, and the rewritten text as `evidence_text` — the
+  last two removing a second large CV-parsing call on a path that had
+  previously failed against Groq's per-minute token limit *after* the rewrite
+  was already paid for. `tests/test_engine_cutover.py` asserts the counts.
+- **`FIT_THRESHOLD` was left at 0.7**, uncalibrated for the new range, on the
+  reasoning that an unreachable threshold reproduces existing behaviour while
+  a too-low one starts auto-applying to mismatched jobs.
+
+See [SCORING.md](SCORING.md) for the full pipeline, the credit/weight tables,
+and a worked example on a real posting from the database.
 
 ### `agents/cv_rewriter_agent.py` — tailoring the CV for low-fit jobs
 
-Only reached when `ats_result["score"] < 0.7`. Two responsibilities: get the
-LLM to rewrite the CV text, then render that text into a real PDF matching
-the look of the user's original CV.
+Only reached when `ats_result["score"] < 0.7`. Two responsibilities, now
+split across two modules: decide what the tailored CV should say
+(`cv_rewriter_agent.py`), and lay it out (`cv_render.py`).
 
-**`rewrite_cv(cv_text, job_description, missing_skills)`** — one LLM call
-(`temperature=0.3`, the only agent that doesn't use `0.0`, since some
-rephrasing variety is wanted here) with a system prompt that is explicit
-about the integrity rule: incorporate keywords the candidate genuinely has
-experience with, restructure around measurable impact, and **never fabricate
-missing skills into the CV** — they're reported separately instead. The
-prompt also pins down an exact plain-text layout (name line, contact line,
-blank line, ALL-CAPS section headers, `- ` bulleted items, no markdown
-symbols) so the output can be parsed by the PDF renderer below without any
-markdown-to-PDF conversion step. If the LLM returns empty content (seen in
-practice with Groq's `gpt-oss` models running out of their reasoning token
-budget — see `llm.py` above), this raises a `RuntimeError` with an
-actionable message instead of silently writing a blank PDF, which is what
-used to happen before this check existed.
+**`rewrite_cv(cv_text, job_description, missing_skills, profile=None)`** — one
+LLM call (`temperature=0.3`, the only agent that doesn't use `0.0`, since some
+rephrasing variety is wanted here) that returns **JSON, not a CV**. The model
+is given the stored profile with an index on every experience entry and every
+project, and answers with refs plus rewritten bullets:
 
-**`save_cv_as_pdf(cv_text, output_path)`** — renders that plain text into a
-formatted PDF with `reportlab`, styled to visually echo the user's uploaded
-CV: centered name in a navy accent color (`CV_ACCENT_COLOR = "#1F3A5F"`,
-sampled directly from the original CV's own divider-rule color via
-`pdfplumber`), a muted contact line beneath it, section headers in the same
-accent color each followed by a full-width horizontal rule, and `- `-prefixed
-lines rendered as bulleted paragraphs. It walks the text line-by-line,
-classifying each line via `_looks_like_header()` (matches a fixed keyword
-set like "experience"/"education", or a short all-caps line with no
-sentence punctuation) and `_looks_like_bullet()` (starts with `-`, `*`, `•`,
-or `–`), falling back to a plain body paragraph otherwise. Uses Helvetica
-throughout rather than trying to match the original's exact font, since
-embedding non-free fonts (e.g. Calibri) isn't viable — the goal is matching
-the dominant visual signature, not pixel-identical reproduction.
+    {"summary": "...",
+     "experience": [{"ref": 0, "bullets": ["..."]}],
+     "projects":   [{"ref": 2, "bullets": ["..."]}],
+     "skills":     [{"category": "AI/LLM", "items": ["..."]}]}
+
+Contact details, employers, dates, locations, project URLs and degrees are
+never sent to the model and never come back from it — `build_document()`
+merges them in afterwards from `profile_store`, which is what makes a
+fabricated employer or a moved date structurally impossible rather than
+merely discouraged. `build_document()` also drops any skill that appears
+neither in the profile nor in the CV text, drops anything on the
+`missing_skills` list, and flags any bullet whose numbers appear nowhere in
+that entry's source bullets. Those findings are returned as
+`document["integrity_warnings"]` and surfaced in the debug bench rather than
+silently repaired.
+
+`profile=None` (the user has never run an extraction on the Profile page)
+falls back to the previous plain-text path, since there is nothing to
+reconcile against. An unparseable JSON response falls back to returning the
+raw text, which the renderer still lays out with its legacy line-based
+layout — a worse CV, but not a discarded one. If the LLM returns empty
+content (seen in practice with Groq's `gpt-oss` models running out of their
+reasoning token budget — see `llm.py` above), this raises a `RuntimeError`
+with an actionable message instead of silently writing a blank PDF.
+
+### One profile, every reader
+
+The CV page uploads a file; that upload extracts and REPLACES the stored
+profile (`api._extract_and_store_profile`, best-effort — the file is saved and
+the upload succeeds even when the model call fails, with the reason shown on
+the page). The Profile page is where the user corrects and extends that
+record. Everything downstream then reads the profile, not the file:
+
+- **searching** — `query_expansion_agent.get_target_roles(position,
+  candidate_text=…)` calibrates the role list to the profile, and
+  `embeddings.embed_candidate()` builds the semantic query vector from it.
+  Both caches key on that text's content, so an edit on the Profile page
+  re-expands and re-embeds rather than reusing an answer calibrated to the
+  old record. This is the most expensive stage to read a stale document in:
+  it decides which jobs are ever seen.
+- **ranking** — every factor. Skills through `skill_matching.find_term` over
+  the profile, experience through `cv_profile.professional_years`, education
+  from the profile's structured degree entries. `rank_jobs` loads the profile
+  once per run and threads it down; the stage stays LLM-free.
+- **scoring** — `orchestrator.score_node` and the debug bench both pass the
+  stored profile into `compute_ats_score`, so requirement matching, the skill
+  gap and `missing_skills` describe what the candidate HAS, not what one
+  snapshot happened to say. A gap the user closed on the Profile page stops
+  being reported.
+- **targeting and tailoring** — `build_targets` and `build_document` work
+  from the profile.
+- **the CV file itself** is read for exactly two things now, both genuinely
+  properties of the document rather than of the candidate:
+  `compute_ats_compatibility` (can a parser read it?) and the fallback for a
+  run before anything has been extracted. `cv_profile.profile_text()` is the
+  shared rendering every other stage searches.
+
+`config.ATS_SCORE_MODE` decides how many numbers the user sees. `both` scores
+the profile as it stands, tailors only below `FIT_THRESHOLD`, and reports the
+delta. `tailored_only` reports one number — which necessarily means every job
+is tailored, since there is no baseline left to gate on, at one model call per
+job. The requirement match runs either way: it is where the gap, the missing
+skills and the tailoring targets come from, so the setting governs what is
+reported and gated on, never whether the candidate is examined.
+
+### `agents/cv_profile.py` — reading the skills back out of the work
+
+`demonstrated_skills(profile)` answers the question the skills row cannot:
+which skills does the dated work actually evidence? It scans experience and
+project spans only — never the skills list, whose whole problem is that it
+asserts without context — over the matcher's existing vocabulary, and
+returns each skill with the line that earned it and how: **direct** (the
+span names it) or **implied** (the span names something that requires it —
+FastAPI, so Python; PostgreSQL, so SQL). No new table and no LLM call: the
+alias, hyponym and prerequisite tables already are the vocabulary, and
+anything outside them is left alone rather than guessed at. `debug_ats`
+reports it beside ATS compatibility, since like compatibility it is a
+property of the profile rather than of any one job.
+
+### `agents/cv_targeting.py` — writing the job's own vocabulary
+
+A CV can describe exactly the right work in the wrong words. The job asks for
+"Deep Learning" and the CV says "CNN"; it asks for "SQL" and the CV says
+"PostgreSQL"; it writes "Large Language Models (LLM)" and the CV only ever
+writes "LLM". The scorer already knows these are the same claim — that is what
+`skill_matching.HYPONYMS` and `skill_matching.IMPLIED_BY` are for — but it
+pays them at a discount: `subset, demonstrated` is 0.80 and
+`implied, demonstrated` 0.90 where `exact, demonstrated` is 1.00. The points
+were being lost to wording alone.
+
+**`build_targets(profile, requirement_results=…, missing_skills=…)`** turns
+that gap into instructions. For each requirement not already earning full
+credit, it finds the entry whose own bullets contain a term the entailment
+tables connect to it, and emits a **bridge**: "experience[1] says 'cnn',
+which is a kind of 'Deep Learning' — keep 'cnn' and work the job's wording
+into the same bullet", or, for a prerequisite, "experience[0] says
+'fastapi', which is not used without 'Python' — name Python in the same
+bullet as the thing it was built with." A second kind, **form**, fires when the entry
+and the job use the two halves of an acronym pair, and asks for the full form
+once and the short form elsewhere; that one is worth nothing to this scorer,
+which treats them as aliases, and everything to an ATS on the other side doing
+literal string matching.
+
+The direction of the whole design is the point. The obvious alternative —
+hand the model the job description and say "use its terminology" — produces
+exactly the fabrication this pipeline exists to prevent, because a model told
+to match a posting's vocabulary writes "Kubernetes" into a CV that only ever
+used Docker. So the bridges are enumerated from the tables instead, each one
+naming the entry that holds the evidence, and the model is told which of the
+job's words apply and where rather than being asked. `build_document` then
+re-checks every job term that appears in a rewritten bullet but not in that
+entry's source: a term on the missing-skills list takes its bullet with it, a
+term the tables can't connect to that entry is reported. The summary is
+checked the same way against the whole profile.
+
+Measured on a real profile against a real posting: 0.6375 → 0.6975, entirely
+from wording — Deep Learning and SQL each 0.80 → 1.00, Kubernetes untouched at
+0. `tests/test_cv_targeting.py` pins both halves, including the score itself.
+
+`listed_only()` reports the requirements the CV only NAMES — PyTorch in a
+skills list, in no role. Since 2026-08-27 it no longer counts a skill the
+work implies: Python listed in the keyword row with a FastAPI bullet on
+record is evidenced, and telling the candidate to go and prove it would be
+advice about a gap that isn't there. A rewrite cannot honestly move those into a role, so
+they surface in the bench as advice: only the candidate knows whether that
+internship used PyTorch, and saying so on the Profile page is worth 35% of
+that requirement.
+
+### `agents/cv_render.py` — laying the tailored CV out
+
+**`save_cv_as_pdf(document, output_path)`** renders the document with
+`reportlab` in the blueprint layout: headline and name centered in a navy
+accent color (`CV_ACCENT_COLOR = "#1F3A5F"`, sampled directly from the
+original CV's own divider-rule color via `pdfplumber`), a muted contact line
+with clickable LinkedIn/GitHub, section headers each followed by a full-width
+rule, and one two-cell table row per entry so **dates and location sit
+right-aligned on the same line as the job title** — the thing plain text
+could not express, and most of the reason tailored CVs used to run to two
+pages. Bullets carry `**bold**` spans converted to `<b>` after XML-escaping
+(never before), and project links render as real PDF link annotations.
+
+One page is a target, not a hope, and the fit runs in three steps. First,
+cut only as much as the FLOOR density needs: `_trim_step()` removes one thing
+at a time in a fixed order — the optional footnote, then bullets off the
+projects the model itself ranked lowest, then whole trailing projects, then
+experience bullets down to a floor of two. A job or a degree is never
+dropped, because that leaves an unexplained gap. Second, set the type as
+large as it will go, re-running `FIT_DENSITIES` from the top (largest first)
+so that whatever step one removed can buy back a comfortable size rather than
+leaving the page set at the minimum. Third,
+`_section_gap_that_fills_the_page()` binary-searches the largest per-section
+gap that still fits, so leftover vertical space is spread between sections
+instead of pooling as an inch of white space at the bottom.
+
+The page geometry is measured, not chosen. `PAGE_MARGIN_X = 31.0`,
+`BULLET_GLYPH_INDENT = 4.5` and `BULLET_TEXT_INDENT = 16.0` come from running
+pdfplumber over the user's own `cv/current_cv.pdf`: every line of text on it
+starts at x=31.0, its bullet dots at 35.5 and their text at 46.9, its rules
+run 29.5→582.5, and its content reaches y=777.7. Those margins are narrow by
+word-processor defaults and they are most of why that CV holds a page's worth
+of content — a tailored CV expected to hold the same amount has to use the
+same page.
+
+Everything on the page shares one left edge, and that is load-bearing enough
+to have its own test: the frame `SimpleDocTemplate` builds pads its content
+by 6pt a side, so a table set to `doc.width` is WIDER than the content area,
+and `Table`'s default `hAlign="CENTER"` then nudges every entry row 6pt left
+of the section headers above it. `_doc_width()` accounts for
+`_FRAME_PADDING`, `_new_doc()` subtracts half of it from each margin so the
+first text lands exactly on `PAGE_MARGIN_X`, and the tables are explicitly
+`hAlign="LEFT"`. `test_page_geometry_matches_the_users_own_cv` asserts that
+below the header block, every line on the page begins on the margin, the
+bullet dot indent, or the bullet text indent — and nothing else.
+
+**`render_cv_text(document)`** flattens the same document to plain text with
+ALL-CAPS section headers. This is not a convenience: rescoring reads evidence
+structurally out of it via `cv_profile.spans_from_text()` instead of paying
+for a second parse, so the headers have to stay ones that reader recognizes.
+Both entry points accept a plain string and pass it through unchanged, which
+is what keeps the degraded path (and every test that patches `rewrite_cv`
+with a string) working.
+
+Helvetica throughout rather than the original's exact font, since embedding
+non-free fonts (e.g. Calibri) isn't viable — the goal is matching the
+dominant visual signature, not pixel-identical reproduction.
 
 `_sanitize_for_pdf_font()` / `_PDF_UNSAFE_PUNCTUATION` exist because
 reportlab's base Helvetica font only supports the WinAnsi character set, and
@@ -479,20 +1021,41 @@ anyway for consistency/defense) before layout.
 `python-docx`) but isn't currently wired into the orchestrator — only the
 PDF path is.
 
-### `agents/apply_agent.py` — whitelist-only auto-submit gate
+### `agents/apply_agent.py` — the auto-apply gate
 
-This is the file that enforces the project's core safety rule, and it's
-deliberately small. `decide_apply_path(job)`:
+`decide_apply_path(job)` is the single function every job's apply decision
+runs through, and it's entirely driven by `config.AUTO_APPLY_MODE` (Settings
+page's "Auto-Apply Behavior" panel), one of three string values:
 
-1. If `job["source"]` isn't in `search_agent.WHITELISTABLE_SOURCES`
-   (`{"greenhouse", "lever"}`), the answer is always `"draft_for_review"` —
-   no other source type can ever auto-submit, full stop.
-2. Otherwise, builds a `"source:identifier"` key via `_job_whitelist_key()`
-   (identifier is the job's board token, company slug, or watchlist company,
-   whichever is present) and checks whether that exact key, *or* the bare
-   source name, is in `config.WHITELISTED_SOURCES` (parsed from `.env`'s
-   comma-separated `WHITELISTED_SOURCES`). Match → `"auto_submit"`. No
-   match → `"draft_for_review"`.
+1. **`"off"`** — always `"draft_for_review"`. Nothing ever auto-submits.
+2. **`"any"`** — always `"auto_submit"`, regardless of source. This is a
+   deliberate, explicit opt-in escape hatch from the whitelist-only default
+   below. **Caveat, stated plainly:** `auto_submit_greenhouse()` (see below)
+   is still a Greenhouse-specific stub, so choosing `"any"` changes
+   *routing* — which jobs reach the `auto_submit` node — but can't make a
+   non-Greenhouse job actually get submitted until that function is
+   generalized or a per-site submitter is built. With `DRY_RUN=true` (the
+   default) this mode is harmless and just logs "would have auto-submitted"
+   intent for every job instead of only whitelisted ones.
+3. **`"whitelist"`** — (default, and the original pre-mode design) mirrors
+   the project's original safety rule: builds a `"source:identifier"` key
+   via `_job_whitelist_key()` (identifier is the job's board token, company
+   slug, or watchlist company, whichever is present), and returns
+   `"auto_submit"` only if that exact key *or* the bare source name is in
+   `config.WHITELISTED_SOURCES` *and* `job["source"]` is in
+   `search_agent.WHITELISTABLE_SOURCES` (`{"greenhouse", "lever"}`) — no
+   other source type can ever auto-submit in this mode, full stop. Anything
+   else → `"draft_for_review"`.
+
+`config.py` itself falls back to `"whitelist"` for any unrecognized
+`.env` value (via the shared `_choice()` helper), so a typo or hand-edit
+can't put the app into an undefined auto-apply state.
+
+This function is the single choke point both `orchestrator.py` entry paths
+funnel through — a naturally good-fit job via `route_on_score`, and (only if
+`config.AUTO_APPLY_ON_TAILORED_SCORE` is on) a rewritten CV that cleared
+`config.FIT_THRESHOLD` via `route_after_rewrite` — so neither path can
+bypass whatever mode is currently set.
 
 **`auto_submit_greenhouse()`** is an intentional stub that always raises
 `NotImplementedError`. The docstring explains why it can't be generic:
@@ -589,8 +1152,15 @@ agent and job depends on them:
   module imports typed values from here instead of reading `.env` directly.
 - **`db.py`** — SQLAlchemy engine/session setup (SQLite,
   `expire_on_commit=False` so rows built inside a `with get_session()` block
-  are still readable after it exits). `init_db()` creates tables and calls
-  `search_agent.seed_default_search_sites()`. The engine is created with
+  are still readable after it exits). `init_db()` creates tables, then calls
+  `_migrate_schema()` — `Base.metadata.create_all()` only creates *missing
+  tables*, so it silently does nothing for a table that already exists with
+  an older column set (every real user's database, each time a new field is
+  added to a model). `_migrate_schema()` runs guarded `ALTER TABLE ADD
+  COLUMN` statements instead, checking `PRAGMA table_info` first so it's a
+  no-op both on a fresh database (already has every column from
+  `create_all()`) and on a second run against the same old database. Then
+  `init_db()` calls `search_agent.seed_default_search_sites()`. The engine is created with
   `connect_args={"timeout": 30}` and a `connect` event listener sets
   `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=30000` on every
   connection — both layers exist because this app routinely has multiple
@@ -621,28 +1191,44 @@ agent and job depends on them:
 | Table | Written by | Purpose |
 |---|---|---|
 | `jobs` | `jobs/daily_run.py`, `jobs/apply_from_link.py` | One row per job seen, ever. `url` is the dedupe key. |
-| `applications` | `jobs/daily_run.py` (`_process_one_job`) | One row per job that made it through the orchestrator — status tracks `scored_low` / `pending_review` / `auto_submitted` / etc. |
+| `applications` | `jobs/daily_run.py` (`_process_one_job`) | One row per job that made it through the orchestrator — status tracks `scored_low` / `pending_review` / `auto_submitted` / etc. `ats_score`/`ats_breakdown`/`ats_explanation` are set for every row; `tailored_ats_score`/`tailored_ats_breakdown`/`tailored_ats_explanation` only for rows that went through the CV-rewrite path. `match_score`/`match_breakdown` come from the ranking stage that ran *before* the orchestrator, so one row carries both "is this job right for me" and "would my CV pass this employer's ATS". |
 | `skill_gaps` | `jobs/daily_run.py` | One row per job with missing skills, JSON-encoded list. |
 | `news_digests` | `jobs/weekly_news.py` | One row per weekly digest generated. |
 | `email_logs` | `api.py`'s email-send endpoint | One row per send *attempt* (sent/dry_run/failed), not just successes. |
 | `search_sites` | dashboard Search tab, seeded by `search_agent.seed_default_search_sites()` | User-managed extra sites to search, beyond `.env`'s Greenhouse/Lever lists. |
 | `report_logs` | `jobs/daily_report.py`, `jobs/weekly_news.py` | One row per report send attempt (daily or weekly). |
+| `query_expansion_cache` | `agents/query_expansion_agent.py` | One row per distinct Position searched with — the LLM-expanded role list, plus the CV hash it was calibrated to. Avoids re-asking daily for an unchanged Position. |
 
 ## Safety mechanisms, and where they live in the code
 
-- **Whitelist-only auto-submit** — enforced in exactly one place,
+- **Auto-apply gate** — enforced in exactly one place,
   `agents/apply_agent.py::decide_apply_path`. Nothing else in the codebase
-  can cause a real submission.
+  can cause a real submission. It's governed by `config.AUTO_APPLY_MODE`
+  (Settings page → "Auto-Apply Behavior"; `"off"` / `"any"` / `"whitelist"`,
+  default `"whitelist"` — the original, still-recommended whitelist-only
+  behavior). `config.AUTO_APPLY_ON_TAILORED_SCORE` (also in that panel, off
+  by default) sits on top without weakening this: it only controls whether a
+  rewritten CV's tailored score is *allowed to reach* `decide_apply_path` at
+  all via `orchestrator.py::route_after_rewrite` — it still has to pass the
+  identical `AUTO_APPLY_MODE` check as any other job once it gets there.
+  `config.FIT_THRESHOLD` (also Settings-page-configurable, default `0.7`) is
+  a routing input, not a safety gate itself — it decides which jobs get a CV
+  rewrite, not which jobs can auto-submit.
 - **Dry-run** — checked independently in three places that each perform a
   real external side effect: `orchestrator.py::auto_submit_node`,
   `agents/email_agent.py::send_application_email`, and
   `agents/reporter_agent.py::send_telegram_report`. There's no single
   global "dry-run wrapper" — each side-effecting function checks
   `config.DRY_RUN` itself.
-- **Never fabricate CV content** — enforced only by the system prompt in
-  `agents/cv_rewriter_agent.py::rewrite_cv`; there's no programmatic check
-  that the LLM actually complied, so this is a prompting guarantee, not a
-  code-level one.
+- **Never fabricate CV content** — asked for in the system prompt of
+  `agents/cv_rewriter_agent.py::rewrite_cv`, and enforced in code by
+  `build_document()`: facts are merged in from the stored profile rather than
+  taken from the model, an entry referring to a role or project that isn't in
+  the profile is dropped, skills absent from the profile/CV and skills on the
+  `missing_skills` list are filtered out, and bullets citing numbers with no
+  source are reported in `integrity_warnings`. What remains a prompting
+  guarantee is the wording of a bullet itself — that a rewritten bullet still
+  means what the source bullet meant.
 - **Idempotency** — `jobs/daily_run.py::_job_exists` (and the equivalent
   check in `apply_from_link.py`) — a job's URL is checked against the `jobs`
   table before any processing happens, so re-running the search job never

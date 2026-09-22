@@ -24,6 +24,10 @@ credentials/*.json
 cv_output/*.docx
 cv_output/*.pdf
 cv/current_cv.*
+# Search debug reports contain real job titles/URLs and the CV embedding cache
+# is derived from personal CV content -- both are local diagnostics, not source.
+data/search_reports/
+data/cv_embedding_cache.json
 !data/.gitkeep
 !credentials/.gitkeep
 !cv_output/.gitkeep
