@@ -22,11 +22,15 @@ import google_auth_oauthlib.flow
 import config
 import cv_parser
 import env_store
+import profile_store
 from agents import email_agent
 from agents.search_agent import parse_site_url, SENIORITY_LABELS
 from db import get_session, init_db
 from jobs.daily_run import run_daily_search_and_apply
-from models import Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog, SearchSite
+from models import (
+    Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog, SearchSite,
+    QueryExpansionCache, CvProfile,
+)
 
 app = FastAPI(title="Job Application Agent API")
 
@@ -49,6 +53,12 @@ CV_OUTPUT_DIR.mkdir(exist_ok=True)
 # "download" links point straight at the file instead of proxying bytes
 # through a dedicated endpoint.
 app.mount("/files/cv-rewrites", StaticFiles(directory=str(CV_OUTPUT_DIR)), name="cv-rewrites")
+
+# Serves the current master CV itself (cv/current_cv.pdf|docx) -- lets the
+# "Why?" widget render/embed the actual document instead of just its parsed
+# text preview.
+CV_DIR.mkdir(exist_ok=True)
+app.mount("/files/cv", StaticFiles(directory=str(CV_DIR)), name="cv")
 
 
 @app.get("/api/health")
@@ -82,6 +92,15 @@ def stats():
     }
 
 
+def _safe_json_loads(raw: Optional[str]):
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
 @app.get("/api/applications")
 def list_applications(limit: int = 100, status: Optional[str] = None):
     with get_session() as session:
@@ -97,6 +116,18 @@ def list_applications(limit: int = 100, status: Optional[str] = None):
                 "source": j.source_site,
                 "url": j.url,
                 "ats_score": a.ats_score,
+                # NULL means the row predates the flag, and everything written
+                # before it was legacy -- defaulted here so the frontend has a
+                # single, always-present field to switch renderers on rather
+                # than reimplementing the same fallback in each caller.
+                "scoring_engine": a.scoring_engine or "legacy",
+                "ats_breakdown": _safe_json_loads(a.ats_breakdown),
+                "ats_explanation": a.ats_explanation,
+                "tailored_ats_score": a.tailored_ats_score,
+                "tailored_ats_breakdown": _safe_json_loads(a.tailored_ats_breakdown),
+                "tailored_ats_explanation": a.tailored_ats_explanation,
+                "match_score": a.match_score,
+                "match_breakdown": _safe_json_loads(a.match_breakdown),
                 "status": a.status,
                 "cv_path": a.cv_version_path,
                 "email_sent": a.email_sent,
@@ -137,11 +168,16 @@ def news(limit: int = 5):
 
 # ---- settings: LLM provider + API key -------------------------------------
 
+LLM_PROVIDERS = ("ollama", "gemini", "groq", "openrouter")
+
+
 class SettingsUpdate(BaseModel):
     llm_provider: str
     gemini_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     groq_model: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    openrouter_model: Optional[str] = None
     ollama_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
 
@@ -153,16 +189,29 @@ def get_settings():
         "ollama_model": config.OLLAMA_MODEL,
         "ollama_base_url": config.OLLAMA_BASE_URL,
         "groq_model": config.GROQ_MODEL,
+        "openrouter_model": config.OPENROUTER_MODEL,
         # Never echo the real key back to the frontend -- just whether one is set.
         "gemini_api_key_set": bool(config.GEMINI_API_KEY),
         "groq_api_key_set": bool(config.GROQ_API_KEY),
+        "openrouter_api_key_set": bool(config.OPENROUTER_API_KEY),
     }
 
 
 @app.post("/api/settings")
 def update_settings(body: SettingsUpdate):
-    if body.llm_provider not in ("ollama", "gemini", "groq"):
-        raise HTTPException(400, "llm_provider must be 'ollama', 'gemini', or 'groq'")
+    if body.llm_provider not in LLM_PROVIDERS:
+        raise HTTPException(400, f"llm_provider must be one of: {', '.join(LLM_PROVIDERS)}")
+
+    # "__custom__" is the Settings page's sentinel for "the user is typing a
+    # model id into the box next to the dropdown". It must never reach the
+    # .env: saved as GROQ_MODEL it would 404 on every LLM call with an error
+    # naming a model that appears nowhere in the UI, which is a miserable
+    # thing to debug. Rejected here rather than trusted to the frontend,
+    # since this endpoint is reachable without it.
+    if body.groq_model and body.groq_model.strip() == "__custom__":
+        raise HTTPException(400, "groq_model must be a real model id, not the "
+                                 "'Custom…' placeholder — type one in the box "
+                                 "next to the dropdown")
 
     updates = {"LLM_PROVIDER": body.llm_provider}
     if body.ollama_model:
@@ -175,11 +224,17 @@ def update_settings(body: SettingsUpdate):
         updates["GROQ_API_KEY"] = body.groq_api_key
     if body.groq_model:
         updates["GROQ_MODEL"] = body.groq_model
+    if body.openrouter_api_key:
+        updates["OPENROUTER_API_KEY"] = body.openrouter_api_key
+    if body.openrouter_model:
+        updates["OPENROUTER_MODEL"] = body.openrouter_model
 
     if body.llm_provider == "gemini" and not body.gemini_api_key and not config.GEMINI_API_KEY:
         raise HTTPException(400, "GEMINI_API_KEY is required the first time you switch to gemini")
     if body.llm_provider == "groq" and not body.groq_api_key and not config.GROQ_API_KEY:
         raise HTTPException(400, "GROQ_API_KEY is required the first time you switch to groq")
+    if body.llm_provider == "openrouter" and not body.openrouter_api_key and not config.OPENROUTER_API_KEY:
+        raise HTTPException(400, "OPENROUTER_API_KEY is required the first time you switch to openrouter")
 
     env_store.update_env_file(updates)
 
@@ -198,6 +253,428 @@ def update_settings(body: SettingsUpdate):
     }
 
 
+# ---- settings: auto-apply behavior ------------------------------------------
+
+class AutoApplySettingsUpdate(BaseModel):
+    auto_apply_mode: str
+    auto_apply_on_tailored_score: bool
+    fit_threshold: float
+    ats_score_mode: Optional[str] = None
+
+
+def _auto_apply_settings_payload() -> dict:
+    return {
+        "auto_apply_mode": config.AUTO_APPLY_MODE,
+        "auto_apply_on_tailored_score": config.AUTO_APPLY_ON_TAILORED_SCORE,
+        "fit_threshold": config.FIT_THRESHOLD,
+        "ats_score_mode": config.ATS_SCORE_MODE,
+        "ats_score_modes": sorted(config.ATS_SCORE_MODES),
+        "whitelisted_sources": sorted(config.WHITELISTED_SOURCES),
+    }
+
+
+@app.get("/api/settings/auto-apply")
+def get_auto_apply_settings():
+    return _auto_apply_settings_payload()
+
+
+@app.post("/api/settings/auto-apply")
+def update_auto_apply_settings(body: AutoApplySettingsUpdate):
+    if body.auto_apply_mode not in config.AUTO_APPLY_MODES:
+        raise HTTPException(400, f"auto_apply_mode must be one of: {', '.join(config.AUTO_APPLY_MODES)}")
+    if not (0 < body.fit_threshold <= 1):
+        raise HTTPException(400, "fit_threshold must be greater than 0 and at most 1 (e.g. 0.7 for 70%)")
+    score_mode = (body.ats_score_mode or config.ATS_SCORE_MODE).lower()
+    if score_mode not in config.ATS_SCORE_MODES:
+        raise HTTPException(400, f"ats_score_mode must be one of: "
+                                 f"{', '.join(sorted(config.ATS_SCORE_MODES))}")
+
+    updates = {
+        "AUTO_APPLY_MODE": body.auto_apply_mode,
+        "AUTO_APPLY_ON_TAILORED_SCORE": "true" if body.auto_apply_on_tailored_score else "false",
+        "FIT_THRESHOLD": str(body.fit_threshold),
+        "ATS_SCORE_MODE": score_mode,
+    }
+    env_store.update_env_file(updates)
+    for key, value in updates.items():
+        os.environ[key] = value
+    importlib.reload(config)
+    # orchestrator.py and apply_agent.py both read config.* at call time (not
+    # at import time), so no reload needed there -- unlike LLM_PROVIDER,
+    # which agents/llm.py reads once at import.
+    return _auto_apply_settings_payload()
+
+
+# ---- debug: ATS scoring + CV tailoring, in isolation ------------------------
+
+class AtsDebugRequest(BaseModel):
+    job_description: str
+    job_title: Optional[str] = ""
+    # The real pipeline only rewrites when the score falls below
+    # FIT_THRESHOLD. Forcing it lets you iterate on the rewrite prompt against
+    # a job that already passes, without hunting for a low-scoring posting.
+    force_rewrite: bool = False
+    # Off by default: the bench is meant to leave no trace. Turn on to also
+    # render the PDF, which is worth checking on its own -- the PDF layer has
+    # had bugs (blank output, black-square glyphs) that never show up in text.
+    render_pdf: bool = False
+    # "both" (score the CV as it stands and the tailored one) or
+    # "tailored_only" (one number, and the rewrite always runs). Defaults to
+    # config.ATS_SCORE_MODE so the bench shows what the daily run would do.
+    score_mode: Optional[str] = None
+
+
+
+@app.post("/api/debug/ats")
+def debug_ats(body: AtsDebugRequest):
+    """Runs ONLY the scoring and tailoring stages against a pasted job
+    description, using the current CV.
+
+    Deliberately bypasses search, ranking, the orchestrator graph, and every
+    database write -- the point is a seconds-long loop for iterating on
+    prompts and thresholds, instead of a full search run per attempt. Nothing
+    here is persisted unless render_pdf is set, and even then only a file.
+    """
+    import time
+    from agents.ats_agent import (
+        compute_ats_score, build_improvement_explanation, _rating_label,
+        compute_ats_compatibility,
+    )
+    from agents.cv_rewriter_agent import rewrite_cv, render_cv_text, save_cv_as_pdf
+    from agents.llm import describe_llm_error
+
+    jd = (body.job_description or "").strip()
+    if not jd:
+        raise HTTPException(400, "job_description is required")
+
+    cv_path = cv_parser.find_default_cv(str(CV_DIR))
+    if not cv_path:
+        raise HTTPException(400, "No CV uploaded yet — add one on the CV page first.")
+    cv_text = cv_parser.parse_cv(cv_path)
+
+    # Evidence comes from the stored profile, not the file's text: it is the
+    # record the user maintains and the one the tailored CV is built from, so
+    # the skill gap this reports is a gap in what they actually have rather
+    # than in a snapshot they may already have corrected.
+    stored_profile = profile_store.load_profile_dict()
+    score_mode = (body.score_mode or config.ATS_SCORE_MODE).lower()
+    if score_mode not in config.ATS_SCORE_MODES:
+        raise HTTPException(400, f"score_mode must be one of: "
+                                 f"{', '.join(sorted(config.ATS_SCORE_MODES))}")
+
+    timings = {}
+    started = time.perf_counter()
+    try:
+        ats = compute_ats_score(cv_text, jd, profile=stored_profile)
+    except Exception as exc:  # noqa: BLE001 -- surface provider errors to the UI
+        raise HTTPException(502, f"Scoring failed: {describe_llm_error(exc)}") from exc
+    timings["ats_scoring"] = round(time.perf_counter() - started, 2)
+
+    result = {
+        "cv_file": os.path.basename(cv_path),
+        "cv_chars": len(cv_text),
+        "fit_threshold": config.FIT_THRESHOLD,
+        "llm_provider": config.LLM_PROVIDER,
+        "engine": "requirements",
+        "score_mode": score_mode,
+        "profile_source": "stored profile" if stored_profile else "extracted from the CV file",
+        # Parse-readiness is a property of the CV alone, so it is reported once
+        # and separately rather than folded into the per-job number. It costs
+        # nothing -- no LLM call -- so it is always included.
+        "compatibility": compute_ats_compatibility(cv_text),
+        "ats": {
+            "score": ats["score"],
+            "rating": _rating_label(ats["score"]),
+            "breakdown": ats["breakdown"],
+            "explanation": ats["explanation"],
+            "missing_skills": ats["missing_skills"],
+            "required_skills": ats["required_skills"],
+            "requirement_results": ats.get("requirement_results"),
+            # Phase 8: strengths, the gaps a rewrite may close, the gaps it
+            # must not, and the hard failures. Deterministic — see
+            # agents/recommendation.py.
+            "recommendation": ats.get("recommendation"),
+            # What the semantic layer did, or why it did nothing. A reader
+            # seeing "unavailable: connection refused" learns something a
+            # missing match never tells them.
+            "retrieval": ats.get("retrieval"),
+            "inactive_buckets": ats.get("inactive_buckets"),
+            "cv_years": ats.get("cv_years"),
+            "cv_profile_cached": ats.get("cv_profile_cached"),
+        },
+        "rewrite": None,
+        "timings": timings,
+    }
+
+    below_threshold = ats["score"] < config.FIT_THRESHOLD
+    # tailored_only reports one number, so there is no baseline to gate on --
+    # the rewrite always runs, exactly as the daily run does in that mode.
+    if score_mode != "tailored_only" and not (below_threshold or body.force_rewrite):
+        result["rewrite_skipped_because"] = (
+            f"score {ats['score']:.2f} is at or above the fit threshold "
+            f"({config.FIT_THRESHOLD}); tick 'force rewrite' to run it anyway"
+        )
+        return result
+
+    started = time.perf_counter()
+    try:
+        # The stored profile is preferred over the extraction scoring just
+        # built: it carries the user's hand corrections and the fields a CV
+        # needs but scoring never reads (per-role locations, project links).
+        # Everything factual in the tailored CV comes from it -- see
+        # cv_rewriter_agent.build_document.
+        tailoring_profile = stored_profile or ats.get("cv_profile")
+        # The scoring pass's own per-requirement verdict goes in with it: it is
+        # what tells the rewrite which of the job's words this CV has already
+        # earned but not yet used. See agents/cv_targeting.py.
+        document = rewrite_cv(cv_text, jd, ats["missing_skills"],
+                              profile=tailoring_profile,
+                              requirement_results=ats.get("requirement_results"),
+                              required_skills=ats.get("required_skills"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"CV rewrite failed: {describe_llm_error(exc)}") from exc
+    # Rescoring, the debug pane and anything that stores the CV all want text;
+    # the PDF wants the document. A plain string (the degraded path) passes
+    # through render_cv_text unchanged.
+    tailored = render_cv_text(document)
+    timings["rewrite"] = round(time.perf_counter() - started, 2)
+
+    started = time.perf_counter()
+    # Reuse the already-extracted requirements, exactly as orchestrator.py does
+    # -- otherwise the bench would cost an extra LLM call the real path
+    # doesn't, and its timings would misrepresent production cost. The
+    # requirements engine reuses the whole structured extraction (categories
+    # and importance included), not just a list of names, so the before/after
+    # comparison is scored against an identical rubric.
+    reuse = ats.get("requirements")
+    # Score the rewrite WITHOUT re-parsing it. The profile is already known,
+    # and the no-fabrication rule means the rewrite cannot change the dates it
+    # supplies; evidence is read structurally from the new text instead. That
+    # removes the second large LLM call of the run -- which is where this
+    # endpoint was failing outright on Groq's 8,000-tokens-per-minute free
+    # tier, after the expensive rewrite had already succeeded and been paid for.
+    extra = {"evidence_text": tailored}
+    if ats.get("cv_profile"):
+        extra["profile"] = ats["cv_profile"]
+    try:
+        tailored_ats = compute_ats_score(tailored, jd, required_skills=reuse, **extra)
+    except Exception as exc:  # noqa: BLE001
+        # Deliberately NOT a bare re-raise: an uncaught exception here returns
+        # a 500 with no body, discarding a tailored CV that just cost a full
+        # rewrite. Report what actually failed instead -- the previous message
+        # said "CV rewrite failed" for errors raised well after the rewrite.
+        raise HTTPException(502, f"Re-scoring the tailored CV failed: "
+                                 f"{describe_llm_error(exc)}") from exc
+    timings["rescore"] = round(time.perf_counter() - started, 2)
+
+    pdf_path = None
+    if body.render_pdf:
+        CV_OUTPUT_DIR.mkdir(exist_ok=True)
+        pdf_path = str(CV_OUTPUT_DIR / "debug_tailored_cv.pdf")
+        try:
+            save_cv_as_pdf(document, pdf_path)
+        except Exception as exc:  # noqa: BLE001 -- a PDF failure shouldn't lose the text
+            pdf_path = None
+            result["pdf_error"] = str(exc)
+
+    result["rewrite"] = {
+        "triggered_by": ("every job is tailored in tailored-only mode"
+                         if score_mode == "tailored_only"
+                         else "score below threshold" if below_threshold else "forced"),
+        "tailored_cv": tailored,
+        "tailored_chars": len(tailored),
+        "tailored_score": tailored_ats["score"],
+        "tailored_rating": _rating_label(tailored_ats["score"]),
+        "tailored_breakdown": tailored_ats["breakdown"],
+        "tailored_requirement_results": tailored_ats.get("requirement_results"),
+        "improvement": build_improvement_explanation(ats, tailored_ats),
+        # What reconciliation refused to take from the model: a role or
+        # project that isn't in the profile, a skill the CV never claimed, a
+        # metric with no source. Reported rather than hidden -- a rewrite that
+        # tried to invent something is worth seeing even when the guard caught
+        # it.
+        "integrity_warnings": (document.get("integrity_warnings")
+                               if isinstance(document, dict) else []),
+        # Which of the job's own words the rewrite managed to place, and which
+        # requirements are stuck at listed-only credit because no role on
+        # record mentions them. Both are the feedback loop for tailoring: a
+        # coverage of 0 means the rewrite changed nothing the scorer sees.
+        "target_coverage": (document.get("target_coverage")
+                            if isinstance(document, dict) else None),
+        "listed_only": (document.get("listed_only")
+                        if isinstance(document, dict) else []),
+        "delta": round(tailored_ats["score"] - ats["score"], 4),
+        "pdf_url": f"/files/cv-rewrites/{os.path.basename(pdf_path)}" if pdf_path else None,
+    }
+    return result
+
+
+@app.get("/api/ollama/status")
+def ollama_status():
+    """Is Ollama up, and are the models this app is configured to use pulled?
+
+    Exists because the alternative is finding out mid-run: a missing model or
+    a stopped `ollama serve` surfaces as a connection error or a 404 deep
+    inside a search, after the run has already spent time on everything else.
+    Asking up front turns that into a Settings-page answer.
+
+    Deliberately short-timeout and non-fatal -- this endpoint reports, it
+    never raises, so a page load can't hang on a wedged daemon.
+    """
+    import requests
+    base = config.OLLAMA_BASE_URL.rstrip("/")
+    try:
+        resp = requests.get(f"{base}/api/tags", timeout=3)
+        resp.raise_for_status()
+        installed = [m.get("name", "") for m in resp.json().get("models", [])]
+    except Exception as exc:  # noqa: BLE001 -- unreachable, refused, malformed
+        return {
+            "reachable": False,
+            "base_url": base,
+            "error": str(exc)[:200],
+            "installed_models": [],
+            "llm_model": config.OLLAMA_MODEL,
+            "llm_model_present": False,
+            "embedding_model": config.OLLAMA_EMBEDDING_MODEL,
+            "embedding_model_present": False,
+        }
+
+    def present(name: str) -> bool:
+        # Ollama reports a bare pull under the ":latest" tag (pulling "qwen3"
+        # lists as "qwen3:latest"), so compare on the tag-stripped name when
+        # the configured value omits a tag -- otherwise an installed model
+        # reads as missing.
+        if not name:
+            return False
+        if ":" in name:
+            return name in installed
+        return any(m.split(":")[0] == name for m in installed)
+
+    return {
+        "reachable": True,
+        "base_url": base,
+        "installed_models": installed,
+        "llm_model": config.OLLAMA_MODEL,
+        "llm_model_present": present(config.OLLAMA_MODEL),
+        "embedding_model": config.OLLAMA_EMBEDDING_MODEL,
+        "embedding_model_present": present(config.OLLAMA_EMBEDDING_MODEL),
+    }
+
+
+# ---- settings: job matching (expansion / embeddings / ranking) --------------
+
+class MatchingSettingsUpdate(BaseModel):
+    search_only_mode: bool = False
+    search_query_expansion: bool
+    query_expansion_max_roles: int
+    serpapi_expansion_limit: int
+    embedding_provider: str
+    embedding_model: Optional[str] = None
+    cv_job_similarity_threshold: float
+    match_score_threshold: float
+
+
+def _matching_settings_payload() -> dict:
+    return {
+        "search_only_mode": config.SEARCH_ONLY_MODE,
+        "search_query_expansion": config.SEARCH_QUERY_EXPANSION,
+        "query_expansion_max_roles": config.QUERY_EXPANSION_MAX_ROLES,
+        "serpapi_expansion_limit": config.SERPAPI_EXPANSION_LIMIT,
+        "embedding_provider": config.EMBEDDING_PROVIDER,
+        "embedding_model": (
+            config.GEMINI_EMBEDDING_MODEL if config.EMBEDDING_PROVIDER == "gemini"
+            else config.OLLAMA_EMBEDDING_MODEL
+        ),
+        "ollama_embedding_model": config.OLLAMA_EMBEDDING_MODEL,
+        "gemini_embedding_model": config.GEMINI_EMBEDDING_MODEL,
+        "known_embedding_models": config.KNOWN_EMBEDDING_MODELS,
+        "semantic_candidate_cap": config.SEMANTIC_CANDIDATE_CAP,
+        "embedding_max_per_run": config.EMBEDDING_MAX_PER_RUN,
+        "cv_job_similarity_threshold": config.CV_JOB_SIMILARITY_THRESHOLD,
+        "match_score_threshold": config.MATCH_SCORE_THRESHOLD,
+        "gemini_api_key_set": bool(config.GEMINI_API_KEY),
+    }
+
+
+@app.get("/api/settings/matching")
+def get_matching_settings():
+    return _matching_settings_payload()
+
+
+@app.post("/api/settings/matching")
+def update_matching_settings(body: MatchingSettingsUpdate):
+    if body.embedding_provider not in config.EMBEDDING_PROVIDERS:
+        raise HTTPException(400, f"embedding_provider must be one of: {', '.join(sorted(config.EMBEDDING_PROVIDERS))}")
+    if body.embedding_provider == "gemini" and not config.GEMINI_API_KEY:
+        raise HTTPException(400, "EMBEDDING_PROVIDER=gemini needs a Gemini API key — set one in the LLM Provider panel first.")
+    if not (1 <= body.query_expansion_max_roles <= 20):
+        raise HTTPException(400, "query_expansion_max_roles must be between 1 and 20")
+    if not (0 <= body.serpapi_expansion_limit <= 10):
+        raise HTTPException(400, "serpapi_expansion_limit must be between 0 and 10 (SerpAPI's free tier is 100 searches/month)")
+    if not (0 < body.cv_job_similarity_threshold <= 1):
+        raise HTTPException(400, "cv_job_similarity_threshold must be greater than 0 and at most 1")
+    if not (0 <= body.match_score_threshold <= 1):
+        raise HTTPException(400, "match_score_threshold must be between 0 and 1 (0 disables the gate)")
+
+    updates = {
+        "SEARCH_ONLY_MODE": "true" if body.search_only_mode else "false",
+        "SEARCH_QUERY_EXPANSION": "true" if body.search_query_expansion else "false",
+        "QUERY_EXPANSION_MAX_ROLES": str(body.query_expansion_max_roles),
+        "SERPAPI_EXPANSION_LIMIT": str(body.serpapi_expansion_limit),
+        "EMBEDDING_PROVIDER": body.embedding_provider,
+        "CV_JOB_SIMILARITY_THRESHOLD": str(body.cv_job_similarity_threshold),
+        "MATCH_SCORE_THRESHOLD": str(body.match_score_threshold),
+    }
+    # The model belongs to whichever provider is selected -- writing it to the
+    # other provider's key would silently do nothing.
+    if body.embedding_model and body.embedding_model.strip():
+        model_key = ("GEMINI_EMBEDDING_MODEL" if body.embedding_provider == "gemini"
+                     else "OLLAMA_EMBEDDING_MODEL")
+        updates[model_key] = body.embedding_model.strip()
+    env_store.update_env_file(updates)
+    for key, value in updates.items():
+        os.environ[key] = value
+    importlib.reload(config)
+    return _matching_settings_payload()
+
+
+@app.delete("/api/settings/matching/expansion-cache")
+def clear_expansion_cache():
+    """Drops every cached query expansion so the next run re-asks the LLM.
+
+    Useful after changing the LLM provider or max-roles setting -- neither
+    invalidates the cache on its own, since the cache key is the Position
+    string (plus CV hash), not the settings that produced it.
+    """
+    with get_session() as session:
+        deleted = session.query(QueryExpansionCache).delete()
+    return {"deleted": deleted}
+
+
+@app.get("/api/settings/matching/expansion-preview")
+def expansion_preview():
+    """The role phrases the CURRENT saved Position expands to, so the Search
+    tab can show what's actually being searched for. Reads the cache only --
+    never triggers an LLM call from a page load."""
+    position = config.SEARCH_POSITION_QUERY
+    if not position:
+        return {"position": "", "target_roles": [], "cached": False}
+    with get_session() as session:
+        row = (
+            session.query(QueryExpansionCache)
+            .filter(QueryExpansionCache.position_query == position)
+            .first()
+        )
+    if not row:
+        return {"position": position, "target_roles": [], "cached": False}
+    return {
+        "position": position,
+        "target_roles": _safe_json_loads(row.expanded_roles) or [],
+        "cached": True,
+        "date_created": row.date_created.isoformat() if row.date_created else None,
+    }
+
+
 # ---- CV upload --------------------------------------------------------------
 
 def _cv_status_payload() -> dict:
@@ -212,6 +689,7 @@ def _cv_status_payload() -> dict:
         "filename": path.name,
         "size_bytes": stat.st_size,
         "modified": stat.st_mtime,
+        "file_url": f"/files/cv/{path.name}",
     }
     try:
         text = cv_parser.parse_cv(cv_path)
@@ -244,7 +722,136 @@ async def cv_upload(file: UploadFile = File(...)):
     contents = await file.read()
     dest.write_bytes(contents)
 
-    return _cv_status_payload()
+    payload = _cv_status_payload()
+    # Uploading a CV IS how the profile gets filled: one record of the user,
+    # seeded from the document they just handed over. Deliberately a full
+    # replacement -- a new file is a new statement of what is true, and a
+    # profile still describing the previous document is the stale state
+    # profile_store.is_stale() exists to complain about.
+    #
+    # Best-effort: the file is already saved, and a provider outage must not
+    # turn a successful upload into an error. The Profile page's "Re-extract
+    # from CV" button remains the manual path when this fails.
+    try:
+        _extract_and_store_profile(str(dest))
+        payload["profile_extracted"] = True
+    except Exception as exc:  # noqa: BLE001 -- reported, never fatal
+        from agents.llm import describe_llm_error
+        payload["profile_extracted"] = False
+        payload["profile_error"] = describe_llm_error(exc)
+    return payload
+
+
+# ---- structured CV profile ---------------------------------------------------
+#
+# The Profile page. See profile_store.py for why the profile is a persisted,
+# editable record rather than the disposable hash-keyed cache entry that
+# agents/cv_profile.py produces.
+
+
+class ProfileUpdate(BaseModel):
+    profile: dict
+
+
+def _profile_payload() -> dict:
+    """The stored profile plus enough context for the page to explain itself:
+    which file it came from, whether that file has since changed, and which
+    sections the user has hand-edited."""
+    cv_path = cv_parser.find_default_cv(str(CV_DIR))
+    cv_text = None
+    if cv_path:
+        try:
+            cv_text = cv_parser.parse_cv(cv_path)
+        except Exception:  # noqa: BLE001 -- an unparseable CV shouldn't 500 this page
+            cv_text = None
+
+    stored = profile_store.load()
+    return {
+        "has_profile": stored is not None,
+        "has_cv": bool(cv_path),
+        "cv_filename": os.path.basename(cv_path) if cv_path else None,
+        # True when the uploaded CV is no longer the document this profile was
+        # extracted from -- the page says so rather than quietly scoring
+        # against a profile of a file the user already replaced.
+        "cv_changed_since_extraction": profile_store.is_stale(stored, cv_text),
+        "section_labels": profile_store.SECTION_LABELS,
+        **(stored or {
+            "profile": profile_store.empty_profile(),
+            "source_cv_filename": None, "source_cv_hash": None,
+            "extracted_at": None, "edited_at": None, "edited_sections": [],
+        }),
+    }
+
+
+@app.get("/api/profile")
+def get_profile():
+    return _profile_payload()
+
+
+@app.post("/api/profile")
+def update_profile(body: ProfileUpdate):
+    """Save hand-edited profile data. No LLM call -- this is the user
+    correcting the extraction, so nothing here needs a model's opinion."""
+    profile_store.save(body.profile)
+    return _profile_payload()
+
+
+@app.get("/api/profile/re-extract/preview")
+def preview_re_extract():
+    """What a re-extraction would overwrite, WITHOUT running one.
+
+    Named sections, not a generic warning: "this may overwrite your changes"
+    gives the user nothing to decide on, whereas "Experience and Skills were
+    edited by hand" does. Cheap by design -- it reports the sections already
+    recorded as edited rather than paying for an extraction call to diff
+    against.
+    """
+    stored = profile_store.load()
+    edited = stored["edited_sections"] if stored else []
+    return {
+        "edited_sections": edited,
+        "edited_section_labels": [profile_store.SECTION_LABELS[s] for s in edited],
+        "has_edits": bool(edited),
+    }
+
+
+def _extract_and_store_profile(cv_path: str) -> dict:
+    """Read a CV file and replace the stored profile with what it says.
+
+    One LLM call, deliberately use_cache=False: both callers reach here
+    because the profile should now reflect THIS file, and serving a cached
+    parse back would make an upload (or the re-extract button) appear to do
+    nothing. Raises on failure; callers decide whether that is fatal.
+    """
+    from agents import cv_profile
+
+    cv_text = cv_parser.parse_cv(cv_path)
+    extracted = cv_profile.build_profile(cv_text, use_cache=False)
+    profile_store.save_extraction(extracted,
+                                  cv_filename=os.path.basename(cv_path),
+                                  cv_text=cv_text)
+    return _profile_payload()
+
+
+@app.post("/api/profile/re-extract")
+def re_extract_profile():
+    """Re-read the uploaded CV file and replace the stored profile.
+
+    Destructive by intent -- it is the "start over from the file" action -- so
+    the frontend gates it behind a confirmation naming what will be lost. One
+    LLM call, and deliberately use_cache=False: the point of pressing this
+    button is usually that the cached parse was wrong, and serving the cache
+    back would make the button appear to do nothing.
+    """
+    from agents.llm import describe_llm_error
+
+    cv_path = cv_parser.find_default_cv(str(CV_DIR))
+    if not cv_path:
+        raise HTTPException(400, "No CV uploaded yet — add one on the CV page first.")
+    try:
+        return _extract_and_store_profile(cv_path)
+    except Exception as exc:  # noqa: BLE001 -- provider errors go to the UI intact
+        raise HTTPException(502, f"Extraction failed: {describe_llm_error(exc)}") from exc
 
 
 @app.get("/api/cv/rewrites")
@@ -264,6 +871,16 @@ def cv_rewrites(limit: int = 50):
                 "job_title": j.title,
                 "company": j.company,
                 "ats_score": a.ats_score,
+                # NULL means the row predates the flag, and everything written
+                # before it was legacy -- defaulted here so the frontend has a
+                # single, always-present field to switch renderers on rather
+                # than reimplementing the same fallback in each caller.
+                "scoring_engine": a.scoring_engine or "legacy",
+                "ats_breakdown": _safe_json_loads(a.ats_breakdown),
+                "ats_explanation": a.ats_explanation,
+                "tailored_ats_score": a.tailored_ats_score,
+                "tailored_ats_breakdown": _safe_json_loads(a.tailored_ats_breakdown),
+                "tailored_ats_explanation": a.tailored_ats_explanation,
                 "download_url": f"/files/cv-rewrites/{Path(a.cv_version_path).name}",
                 "date_created": a.date_created.isoformat() if a.date_created else None,
             }

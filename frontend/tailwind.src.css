@@ -1,0 +1,140 @@
+/* Source for tailwind.css -- see tailwind.config.js for the build command.
+   Fonts are self-hosted (assets/fonts) so the dashboard still renders fully
+   offline; nothing here reaches out to a CDN. */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url(assets/fonts/plus-jakarta-sans-latin.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(assets/fonts/material-symbols-outlined.woff2) format("woff2");
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  /* Desktop-only dashboard: narrower windows scroll sideways rather than reflow. */
+  body { @apply min-w-[1100px] bg-background font-sans text-body-md text-on-surface antialiased; }
+  [hidden] { display: none !important; }
+}
+
+@layer components {
+  /* Icon glyphs: <span class="ms">radar</span>. The FILL axis is flipped by
+     .ms-fill for the few places the design uses solid icons. */
+  .ms {
+    font-family: "Material Symbols Outlined";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 20px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: "liga";
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .ms-fill { font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24; }
+
+  /* ---- surfaces ---- */
+  .sa-card { @apply rounded-3xl bg-surface-container-lowest p-6 shadow-sm; }
+  .sa-card-muted { @apply rounded-3xl bg-surface-container-low p-6 shadow-sm; }
+  .sa-tile { @apply rounded-2xl bg-surface-container-low p-4; }
+  .sa-eyebrow { @apply inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-label-sm font-bold uppercase tracking-wider text-primary; }
+  .sa-page-title { @apply text-display-lg-mobile text-on-surface md:text-display-lg; }
+  .sa-page-desc { @apply mt-1 max-w-2xl text-body-md text-on-surface-variant; }
+  .sa-section-title { @apply text-headline-md font-bold tracking-tight text-on-surface; }
+  .sa-card-title { @apply text-headline-sm font-bold text-on-surface; }
+  .sa-icon-badge { @apply flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary-fixed/60 text-primary; }
+
+  /* ---- buttons ---- */
+  .sa-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-surface-container-high px-4 py-2.5 text-label-lg text-on-surface shadow-xs transition-all duration-150 hover:bg-surface-container-highest disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .sa-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-label-lg text-on-primary shadow-md transition-all duration-150 hover:bg-primary-container active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
+  }
+  .sa-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-secondary-container px-4 py-2.5 text-label-lg text-on-secondary-container transition-all duration-150 hover:bg-secondary hover:text-on-secondary disabled:opacity-50;
+  }
+  .sa-btn-sm { @apply px-3 py-1.5 text-label-md; }
+  .sa-btn-ghost { @apply inline-flex items-center gap-1 rounded-lg px-2 py-1 text-label-md font-bold text-primary hover:underline; }
+  .sa-icon-btn { @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-error-container hover:text-error; }
+
+  /* ---- form controls ---- */
+  .sa-label { @apply mb-1.5 block text-label-md text-on-surface-variant; }
+  .sa-input {
+    @apply w-full rounded-xl border border-transparent bg-surface-container-low px-3.5 py-2.5 text-body-sm text-on-surface outline-none transition-colors placeholder:text-outline focus:border-primary/40 focus:bg-surface-container-lowest disabled:opacity-50;
+  }
+  .sa-select { @apply sa-input cursor-pointer appearance-none pr-9; }
+  .sa-select-wrap { @apply relative; }
+  .sa-select-wrap::after {
+    content: "expand_more";
+    font-family: "Material Symbols Outlined";
+    font-size: 18px;
+    line-height: 1;
+    font-feature-settings: "liga";
+    @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant;
+  }
+  .sa-hint { @apply mt-1.5 block text-label-sm font-normal text-on-surface-variant; }
+
+  /* ---- chips / tabs ---- */
+  .sa-chip { @apply inline-flex items-center gap-1 rounded-md bg-surface-container-highest px-2 py-0.5 text-label-sm font-semibold text-on-surface-variant; }
+  .sa-chip-teal { @apply inline-flex items-center gap-1 rounded-md bg-secondary-container px-2 py-0.5 text-label-sm font-bold text-on-secondary-container; }
+  .sa-chip-primary { @apply inline-flex items-center gap-1 rounded-md bg-primary-fixed/70 px-2 py-0.5 text-label-sm font-bold text-primary; }
+  .sa-chip-amber { @apply inline-flex items-center gap-1 rounded-md bg-tertiary-fixed px-2 py-0.5 text-label-sm font-bold text-on-tertiary-fixed-variant; }
+  .sa-chip-error { @apply inline-flex items-center gap-1 rounded-md bg-error-container px-2 py-0.5 text-label-sm font-bold text-on-error-container; }
+  .sa-tabs { @apply inline-flex flex-wrap items-center gap-0.5 rounded-xl bg-surface-container-low p-1; }
+  .sa-tab { @apply rounded-lg px-3 py-1.5 text-label-md font-medium text-on-surface-variant transition-colors hover:text-on-surface; }
+  .sa-tab.is-active { @apply bg-surface-container-lowest font-bold text-on-surface shadow-xs; }
+
+  /* ---- settings: selectable cards bound to a hidden <select> ---- */
+  .mode-card { @apply flex flex-col gap-1.5 rounded-2xl bg-surface-container-low p-5 text-left transition-all hover:bg-surface-container; }
+  .mode-card-kicker { @apply flex items-center justify-between text-label-sm font-bold uppercase tracking-wider text-on-surface-variant; }
+  .mode-card-kicker::after { content: ""; @apply h-4 w-4 rounded-full bg-surface-container-highest; }
+  .mode-card-title { @apply text-headline-sm font-semibold text-on-surface; }
+  .mode-card-desc { @apply flex-1 text-body-sm text-on-surface-variant; }
+  .mode-card-foot { @apply mt-3 flex items-center gap-1.5 text-label-sm font-medium text-on-surface-variant; }
+  .mode-card.is-active { @apply bg-surface-container-high shadow-md ring-2 ring-primary/40; }
+  .mode-card.is-active .mode-card-kicker { @apply text-primary; }
+  .mode-card.is-active .mode-card-kicker::after { @apply border-4 border-primary bg-surface-container-lowest; }
+
+  .provider-card { @apply flex flex-col gap-1 rounded-2xl bg-surface-container-low p-4 text-left transition-all hover:bg-surface-container; }
+  .provider-card-head { @apply mb-2 flex items-center justify-between gap-2; }
+  .provider-dot { @apply h-2.5 w-2.5 rounded-full bg-surface-container-highest; }
+  .provider-badge { @apply rounded bg-surface-container-highest px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant; }
+  .provider-card-title { @apply text-label-lg text-on-surface; }
+  .provider-card-desc { @apply text-label-sm text-on-surface-variant; }
+  .provider-card.is-active { @apply bg-surface-container-high shadow-md ring-2 ring-primary/40; }
+  .provider-card.is-active .provider-dot { @apply bg-primary; }
+  .provider-card.is-active .provider-badge { @apply bg-primary text-on-primary; }
+
+  .sa-range { @apply h-1.5 w-full cursor-pointer appearance-none rounded-full bg-surface-container-highest; accent-color: #9c3e1e; }
+  .sa-range::-webkit-slider-thumb { @apply h-4 w-4 appearance-none rounded-full bg-primary shadow-md; }
+  .sa-range::-moz-range-thumb { @apply h-4 w-4 rounded-full border-0 bg-primary shadow-md; }
+
+  /* ---- misc ---- */
+  .sa-progress { @apply h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest; }
+  .sa-progress > div { @apply h-full rounded-full transition-all duration-500; }
+  .sa-avatar { @apply flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl text-headline-sm font-bold; }
+  .sa-empty { @apply py-6 text-center text-body-sm italic text-on-surface-variant; }
+  .sa-msg { @apply text-label-md font-medium text-on-surface-variant; }
+  .sa-msg.save-success { @apply text-secondary; }
+  .sa-msg.save-error { @apply text-error; }
+}

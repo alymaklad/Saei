@@ -3,90 +3,188 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Application Agent — CV</title>
+<title>Sa'ei — CV Studio</title>
+<link rel="stylesheet" href="tailwind.css">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" href="assets/saei-logo.png">
 </head>
-<body>
-<div class="page">
+<body data-page="cv">
+<main id="page">
+  <div class="flex flex-col space-y-8">
 
-  <header class="topbar">
-    <div class="brand">
-      <img src="assets/logo-128.png" alt="" class="brand-mark">
-      <h1>Job Application Agent</h1>
+    <div class="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+      <div>
+        <h1 class="sa-page-title">CV Studio &amp; Autonomous Tailoring</h1>
+        <p class="sa-page-desc">Manage your master CV and every job-specific tailored copy — reframed around each posting, never fabricated.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <a href="#bench" class="sa-btn"><span class="ms text-[18px]">science</span>Tailoring bench</a>
+        <label for="cv-file-input" class="sa-btn-primary cursor-pointer"><span class="ms text-[18px]">upload</span>Upload new master CV</label>
+      </div>
     </div>
-    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
-  </header>
 
-  <nav class="mainnav">
-    <a href="index.html" class="navlink">Dashboard</a>
-    <a href="search.html" class="navlink">Search</a>
-    <a href="settings.html" class="navlink">Settings</a>
-    <a href="cv.html" class="navlink active">CV</a>
-    <a href="email.html" class="navlink">Email</a>
-    <a href="reports.html" class="navlink">Reports</a>
-    <a href="features.html" class="navlink">Features</a>
-  </nav>
+    <div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
 
-  <main class="narrow-main">
-    <section class="card">
-      <div class="card-header">
-        <h2>Current CV</h2>
-        <span class="card-sub">Used by every search-and-apply run</span>
+      <!-- Left column -->
+      <div class="flex flex-col space-y-6 xl:col-span-5">
+        <section class="sa-card relative overflow-hidden">
+          <div id="cv-current">
+            <p class="sa-empty">Loading&hellip;</p>
+          </div>
+        </section>
+
+        <section class="sa-card-muted">
+          <label id="dropzone" for="cv-file-input"
+            class="dropzone flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-outline-variant/70 px-6 py-8 text-center transition-colors hover:border-primary/50">
+            <span class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-container-lowest text-primary shadow-sm">
+              <span class="ms text-[26px]">cloud_upload</span>
+            </span>
+            <span class="text-headline-sm font-semibold text-on-surface">Sync updated baseline CV</span>
+            <span class="mt-1 text-body-sm text-on-surface-variant" id="dropzone-text">Drag &amp; drop a PDF or DOCX, or click to choose one</span>
+            <span class="sa-chip mt-3">Replaces the current master · PDF / DOCX</span>
+            <input type="file" id="cv-file-input" accept=".pdf,.docx" hidden>
+          </label>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button type="button" id="upload-btn" class="sa-btn-primary" disabled><span class="ms text-[18px]">upload_file</span>Upload</button>
+            <span id="upload-message" class="save-message"></span>
+          </div>
+          <p class="sa-hint">Only one CV is active at a time. Tailored copies are derived from it when a job scores below the fit threshold; the original itself is never overwritten. Uploading also refills your Profile.</p>
+        </section>
+
+        <section class="sa-card">
+          <div class="mb-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="ms text-primary">account_tree</span>
+              <h2 class="sa-card-title">Section Breakdown</h2>
+            </div>
+            <a href="profile.html" class="sa-btn-ghost">Edit in Profile &rarr;</a>
+          </div>
+          <div class="flex flex-col gap-3" id="section-breakdown">
+            <p class="sa-empty">Loading&hellip;</p>
+          </div>
+        </section>
       </div>
-      <div id="cv-current" class="cv-current">Loading&hellip;</div>
-    </section>
 
-    <section class="card">
-      <div class="card-header">
-        <h2>Upload a new CV</h2>
-        <span class="card-sub">.pdf or .docx</span>
-      </div>
-      <div class="upload-body">
-        <label id="dropzone" class="dropzone" for="cv-file-input">
-          <span id="dropzone-text">Drag a file here, or click to choose one</span>
-          <input type="file" id="cv-file-input" accept=".pdf,.docx" hidden>
-        </label>
-        <div class="form-actions">
-          <button type="button" id="upload-btn" class="btn btn-primary" disabled>Upload</button>
-          <span id="upload-message" class="save-message"></span>
+      <!-- Right column -->
+      <div class="flex flex-col space-y-6 xl:col-span-7">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div class="sa-card p-5">
+            <div class="flex items-center justify-between text-on-surface-variant">
+              <span class="text-label-md">Tailored versions</span>
+              <span class="ms text-primary">file_copy</span>
+            </div>
+            <span class="mt-2 block text-headline-xl font-bold text-on-surface" id="cv-variant-count">&mdash;</span>
+            <span class="text-body-sm text-on-surface-variant" id="cv-variant-sub">Generated across target roles</span>
+          </div>
+          <div class="sa-card p-5">
+            <div class="flex items-center justify-between text-on-surface-variant">
+              <span class="text-label-md">Average ATS lift</span>
+              <span class="ms text-secondary">trending_up</span>
+            </div>
+            <span class="mt-2 block text-headline-xl font-bold text-secondary" id="cv-avg-lift">&mdash;</span>
+            <span class="text-body-sm text-on-surface-variant" id="cv-avg-lift-sub">original &rarr; tailored</span>
+          </div>
+          <div class="sa-card p-5">
+            <div class="flex items-center justify-between text-on-surface-variant">
+              <span class="text-label-md">Average tailored ATS</span>
+              <span class="ms text-tertiary">verified</span>
+            </div>
+            <span class="mt-2 block text-headline-xl font-bold text-on-surface" id="cv-avg-score">&mdash;</span>
+            <span class="text-body-sm text-on-surface-variant">best score per job</span>
+          </div>
         </div>
-        <p class="note">
-          Replaces the current CV — only one is active at a time. Every board
-          gets tailored copies derived from this file when the ATS score is
-          below the fit threshold; the original itself is never overwritten.
-        </p>
-      </div>
-    </section>
 
-    <section class="card">
-      <div class="card-header">
-        <h2>Tailored CVs</h2>
-        <span class="card-sub">Generated automatically for low-fit jobs</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Role</th>
-              <th>Company</th>
-              <th>ATS score</th>
-              <th>Date</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="cv-rewrites-body">
-            <tr><td colspan="5" class="empty">Loading&hellip;</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </main>
+        <section class="sa-card">
+          <div class="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div class="flex items-center gap-2">
+              <span class="ms text-primary">layers</span>
+              <h2 class="text-headline-md font-bold text-on-surface">Active Tailored Vault</h2>
+            </div>
+            <label class="relative">
+              <span class="ms pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant">search</span>
+              <input type="text" id="cv-filter" class="sa-input w-full pl-9 sm:w-64" placeholder="Filter by role or company&hellip;">
+            </label>
+          </div>
+          <div class="flex flex-col gap-3" id="cv-rewrites-body">
+            <p class="sa-empty">Loading&hellip;</p>
+          </div>
+          <button type="button" class="sa-btn-ghost mt-3" id="cv-rewrites-more" hidden></button>
+        </section>
 
+        <section class="sa-card" id="bench">
+          <div class="mb-1 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="ms text-primary">science</span>
+              <h2 class="text-headline-md font-bold text-on-surface">ATS &amp; Tailoring Bench</h2>
+            </div>
+            <span class="sa-chip">Nothing is saved</span>
+          </div>
+          <p class="mb-5 text-body-sm text-on-surface-variant">Runs only the scoring and tailoring stages against a job description you paste, using your current CV. No search, no ranking, no apply decision, nothing written to your history — iterate in seconds instead of running a full search.</p>
+          <label for="debug-jd" class="sa-label">Job description</label>
+          <textarea id="debug-jd" rows="8" class="sa-input resize-y" placeholder="Paste the full job description here&hellip;"></textarea>
+          <div class="mt-3 flex flex-col gap-2">
+            <label class="flex items-center gap-2 text-body-sm text-on-surface">
+              <input type="checkbox" id="debug-force-rewrite" class="h-4 w-4 accent-[#9c3e1e]">
+              Force the rewrite even if the score passes the fit threshold
+            </label>
+            <label class="flex items-center gap-2 text-body-sm text-on-surface">
+              <input type="checkbox" id="debug-render-pdf" class="h-4 w-4 accent-[#9c3e1e]">
+              Also render the PDF (checks formatting, not just the text)
+            </label>
+          </div>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button type="button" id="debug-run" class="sa-btn-primary"><span class="ms text-[18px]">play_arrow</span>Run scoring &amp; tailoring</button>
+            <span id="debug-message" class="save-message"></span>
+          </div>
+          <div id="debug-results" class="mt-5" hidden></div>
+        </section>
+
+        <div class="flex items-start gap-3 rounded-2xl bg-surface-container-low p-4">
+          <span class="ms text-secondary">verified_user</span>
+          <p class="text-body-sm text-on-surface-variant"><strong class="text-on-surface">Zero-fabrication guarantee:</strong> tailored CVs only reframe what's already in your profile. Missing skills are reported as gaps, never written into the CV.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="modal-overlay" id="why-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="why-modal-title">
+    <div class="modal-header">
+      <div class="modal-header-main">
+        <span class="modal-score-value" id="why-score-value">&mdash;</span>
+        <span class="rating-badge" id="why-rating-badge"></span>
+        <span class="modal-score-label" id="why-modal-title">ATS score breakdown</span>
+      </div>
+      <button type="button" class="modal-close" id="why-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-tabs">
+      <button type="button" class="modal-tab active" data-tab="original">Original CV</button>
+      <button type="button" class="modal-tab" data-tab="tailored">Tailored CV</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-split">
+        <div id="why-doc-pane"></div>
+        <div>
+          <div class="score-pillars" id="why-pillars"></div>
+          <div class="keyword-section">
+            <div class="keyword-section-title">Matched keywords</div>
+            <div class="keyword-chips" id="why-matched-chips"></div>
+          </div>
+          <div class="keyword-section">
+            <div class="keyword-section-title">Missing keywords</div>
+            <div class="keyword-chips" id="why-missing-chips"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
+<script src="shell.js"></script>
 <script src="config.js"></script>
+<script src="why-modal.js"></script>
+<script src="ui.js"></script>
 <script src="cv.js"></script>
 </body>
 </html>

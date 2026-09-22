@@ -1,0 +1,856 @@
+{
+  "_about": [
+    "The frozen behaviour of the matcher, case by case. Phase 0 of the generic",
+    "matching plan: the semantic layer must widen coverage without quietly",
+    "losing any of the precision these cases pin down.",
+    "",
+    "Each case is one requirement against one hand-written CV. `expect` names",
+    "the relation and evidence location the deterministic matcher must produce",
+    "with no LLM involved. `label` is the golden-dataset judgement in the",
+    "plan's vocabulary (MATCH / PARTIAL / NO_MATCH / SIBLING /",
+    "INSUFFICIENT_EVIDENCE), which is what precision and recall are computed",
+    "against — a case labelled NO_MATCH that produces a relation is a false",
+    "positive, whatever the relation is.",
+    "",
+    "`family` groups cases by job family so coverage can be reported per",
+    "family rather than as one average that hides a weak one.",
+    "",
+    "Cases carrying `semantic_expected` are the calibration set: they are what `python -m bench.report --calibrate` measures the similarity distribution over. `true` means the FIRST span demonstrates the requirement and retrieval must find it; `false` means no span does and retrieval must offer nothing. Every other case's spans double as negatives for every requirement but their own.",
+    "`calibration_group` marks cases that mean the same thing. Their spans are EXCLUDED from each other's negatives during calibration rather than counted as false: \"coordinated with physicians and product stakeholders\" really does demonstrate cross-functional collaboration, and scoring that pair as a negative would make an accurate model look like it cannot separate the classes."
+  ],
+  "cases": [
+    {
+      "id": "sub_01",
+      "family": "software_engineering",
+      "why": "The legacy substring matcher scored R against any CV containing the letter r.",
+      "requirement": {
+        "name": "R",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Aly Tarek, Director of Scalable Systems",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "sub_02",
+      "family": "software_engineering",
+      "why": "C++ at end of line: \\b is defined against \\w and cannot close on a plus sign.",
+      "requirement": {
+        "name": "C++",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Wrote the simulation core in C++",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "exact",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "sub_03",
+      "family": "software_engineering",
+      "why": "The C inside C++ is not the C language.",
+      "requirement": {
+        "name": "C",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Wrote the simulation core in C++",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "sub_04",
+      "family": "software_engineering",
+      "why": "C# must survive the same boundary rules as C++.",
+      "requirement": {
+        "name": "C#",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Maintained an internal tool in C#.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "exact",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "sub_05",
+      "family": "software_engineering",
+      "why": "Node.js must not satisfy a bare Node requirement by prefix.",
+      "requirement": {
+        "name": "Node",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built services on Node.js and Express",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "sub_06",
+      "family": "software_engineering",
+      "why": "A trailing period must not hide a skill.",
+      "requirement": {
+        "name": "Git",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Managed releases with Git.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "exact",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "friend_01",
+      "family": "ai_ml",
+      "why": "ReAct is a reasoning pattern. Scored React at full credit until 2026-08-27.",
+      "requirement": {
+        "name": "React",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Developed a LangGraph ReAct agent with dynamic tool selection",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "friend_02",
+      "family": "ai_ml",
+      "why": "The guard rejects the occurrence, not the document.",
+      "requirement": {
+        "name": "React",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built a ReAct agent for tooling and a React console for operators",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "exact",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "friend_03",
+      "family": "ai_ml",
+      "why": "The React false positive used to cascade into JavaScript through the prerequisite table.",
+      "requirement": {
+        "name": "JavaScript",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Developed a LangGraph ReAct agent with dynamic tool selection",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "sibling_01",
+      "family": "devops_cloud",
+      "why": "Cosine similarity scores AWS and GCP as near-identical because they are the same KIND of thing.",
+      "requirement": {
+        "name": "AWS",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Deployed the services to Google Cloud Platform",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "SIBLING",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "sibling_02",
+      "family": "ai_ml",
+      "why": "Framework siblings.",
+      "requirement": {
+        "name": "TensorFlow",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Trained the classifier in PyTorch",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "SIBLING",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "sibling_03",
+      "family": "devops_cloud",
+      "why": "Running containers is not orchestrating them.",
+      "requirement": {
+        "name": "Kubernetes",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Containerised the service with Docker",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "SIBLING",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "claimed_01",
+      "family": "devops_cloud",
+      "why": "Listed and never used earns 65% of the credit, not zero and not full.",
+      "requirement": {
+        "name": "Kubernetes",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Kubernetes",
+          "source": "skills",
+          "demonstrated": false
+        }
+      ],
+      "label": "INSUFFICIENT_EVIDENCE",
+      "expect": {
+        "relation": "exact",
+        "location": "claimed"
+      }
+    },
+    {
+      "id": "claimed_02",
+      "family": "software_engineering",
+      "why": "A skills row labelled with a category word was once eaten as a section heading.",
+      "requirement": {
+        "name": "Docker",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Tools & DevOps: Git, Docker",
+          "source": "skills",
+          "demonstrated": false
+        }
+      ],
+      "label": "INSUFFICIENT_EVIDENCE",
+      "expect": {
+        "relation": "exact",
+        "location": "claimed"
+      }
+    },
+    {
+      "id": "implied_01",
+      "family": "software_engineering",
+      "why": "Nobody queries PostgreSQL without SQL.",
+      "requirement": {
+        "name": "SQL",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built PostgreSQL-backed services for the reporting pipeline",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "implied",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "implied_02",
+      "family": "ai_ml",
+      "why": "A FastAPI service is Python whether or not the word appears.",
+      "requirement": {
+        "name": "Python",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built a FastAPI service serving a PyTorch model",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "implied",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "implied_03",
+      "family": "ai_ml",
+      "why": "The prerequisite table is one-way.",
+      "requirement": {
+        "name": "FastAPI",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Wrote data processing scripts in Python",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    },
+    {
+      "id": "subset_01",
+      "family": "ai_ml",
+      "why": "A CNN is a kind of deep learning; the reverse is not true.",
+      "requirement": {
+        "name": "Deep Learning",
+        "category": "domain_knowledge",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Trained ResNet50 CNN models for CT image classification",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "PARTIAL",
+      "expect": {
+        "relation": "subset",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "alias_01",
+      "family": "data_analytics",
+      "why": "A curated synonym is interchangeable and must not be discounted.",
+      "requirement": {
+        "name": "PostgreSQL",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Tuned Postgres queries for the analytics dashboard",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "alias",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "alias_02",
+      "family": "ai_ml",
+      "why": "Naming variants of one field, added after a real posting scored 6.75/9 through the LLM.",
+      "requirement": {
+        "name": "Agentic AI solutions",
+        "category": "domain_knowledge",
+        "importance": "preferred"
+      },
+      "spans": [
+        {
+          "text": "Built an autonomous multi-agent system of 8 specialized agents",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "alias",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "vision_01",
+      "family": "ai_ml",
+      "why": "A vision model implies the field; the words computer vision appear nowhere.",
+      "requirement": {
+        "name": "Computer vision",
+        "category": "domain_knowledge",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Developed a multimodal pipeline generating radiology reports from CT scans using a vision-language model.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "implied",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "typo_01",
+      "family": "software_engineering",
+      "why": "A rewrite comes back with U+2011 hyphens. Invisible on the page, fatal to a comparison.",
+      "requirement": {
+        "name": "tool-calling",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built tool‑calling agents with memory management",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "exact",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "typo_02",
+      "family": "data_analytics",
+      "why": "Curly apostrophes in a degree line.",
+      "requirement": {
+        "name": "Bachelor's degree",
+        "category": "education",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Bachelor’s degree, Computer Science, Ain Shams University",
+          "source": "education",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "exact",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "cap_01",
+      "family": "product_management",
+      "why": "A capability the CV demonstrates without repeating the phrase. Deterministic matching cannot see it; this is what the semantic layer is for.",
+      "requirement": {
+        "name": "Stakeholder management",
+        "category": "soft_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Coordinated with physicians, engineers, and product stakeholders to agree the release scope.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true,
+      "calibration_group": "stakeholder_collaboration"
+    },
+    {
+      "id": "cap_02",
+      "family": "finance",
+      "why": "Same shape, a different job family — the engine must not be tuned to software.",
+      "requirement": {
+        "name": "Financial modelling",
+        "category": "domain_knowledge",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built three-statement forecasts and scenario analyses for the annual budget cycle.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true
+    },
+    {
+      "id": "cap_03",
+      "family": "marketing",
+      "why": "And a third, to prove the engine is generic rather than three engines.",
+      "requirement": {
+        "name": "Campaign performance analysis",
+        "category": "responsibility",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Measured channel-level ROAS weekly and reallocated spend against the results.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true
+    },
+    {
+      "id": "cap_04",
+      "family": "product_management",
+      "why": "A capability with NO supporting evidence must stay unmatched however plausible the CV sounds.",
+      "requirement": {
+        "name": "Stakeholder management",
+        "category": "soft_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Refactored the billing service and cut p99 latency by 40%.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": false
+    },
+    {
+      "id": "cap_05",
+      "family": "design",
+      "why": "A design posting's language shares almost no vocabulary with a CV's.",
+      "requirement": {
+        "name": "User research",
+        "category": "responsibility",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Ran moderated usability sessions with twelve participants and fed the findings into the next sprint.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true
+    },
+    {
+      "id": "cap_06",
+      "family": "operations",
+      "why": "Operations requirements are almost never named technologies.",
+      "requirement": {
+        "name": "Vendor management",
+        "category": "responsibility",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Negotiated contracts with three logistics suppliers and held quarterly performance reviews with each.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true
+    },
+    {
+      "id": "cap_07",
+      "family": "data_analytics",
+      "why": "The capability is named in the posting and demonstrated by a line that describes it instead.",
+      "requirement": {
+        "name": "Experiment design",
+        "category": "domain_knowledge",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Designed and ran A/B tests on the onboarding funnel, sizing each for a minimum detectable effect of 2%.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true
+    },
+    {
+      "id": "cap_08",
+      "family": "software_engineering",
+      "why": "A capability the CV plainly does not have, next to lines that sound senior.",
+      "requirement": {
+        "name": "Incident response",
+        "category": "responsibility",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Wrote the data access layer and its unit tests.",
+          "source": "experience",
+          "demonstrated": true
+        },
+        {
+          "text": "Documented the internal API for the mobile team.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": false
+    },
+    {
+      "id": "cap_09",
+      "family": "finance",
+      "why": "Adjacent but not the same: budgeting is not audit work, and a retrieval layer that cannot tell them apart will hand the adjudicator a tempting line.",
+      "requirement": {
+        "name": "Statutory audit",
+        "category": "domain_knowledge",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Built three-statement forecasts and scenario analyses for the annual budget cycle.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": false
+    },
+    {
+      "id": "cap_10",
+      "family": "product_management",
+      "why": "Same shape as cap_01 but phrased as the posting would phrase it, to give calibration a second positive in this family.",
+      "requirement": {
+        "name": "Cross-functional collaboration",
+        "category": "soft_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Worked daily with design, backend and clinical teams to agree scope and unblock delivery.",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "none"
+      },
+      "semantic_expected": true,
+      "calibration_group": "stakeholder_collaboration"
+    },
+    {
+      "id": "vocab_01",
+      "family": "ai_ml",
+      "why": "A degree plainly on the page was missing the requirement on an apostrophe and being rescued by the LLM at 0.75.",
+      "requirement": {
+        "name": "Bachelor's degree",
+        "category": "education",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Dual Bachelor Degree Computer Science Ain Shams University & University of East London",
+          "source": "education",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "alias",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "vocab_02",
+      "family": "software_engineering",
+      "why": "The posting names an activity, the CV names the role that does it. Same claim, one suffix apart.",
+      "requirement": {
+        "name": "full-stack development",
+        "category": "technical_skill",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Full-Stack Developer & Technical Lead, Notopia",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "alias",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "vocab_03",
+      "family": "ai_ml",
+      "why": "Qdrant IS a vector database; the requirement was reaching the LLM for a fact a table can hold.",
+      "requirement": {
+        "name": "vector databases",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Implemented hybrid retrieval with BGE-M3 dense embeddings, BM25, and Qdrant",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "implied",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "vocab_04",
+      "family": "ai_ml",
+      "why": "Same for agent frameworks: LangGraph is one.",
+      "requirement": {
+        "name": "agent frameworks",
+        "category": "tool",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Developed a LangGraph agent with dynamic tool selection",
+          "source": "project",
+          "demonstrated": true
+        }
+      ],
+      "label": "MATCH",
+      "expect": {
+        "relation": "implied",
+        "location": "demonstrated"
+      }
+    },
+    {
+      "id": "vocab_05",
+      "family": "devops_cloud",
+      "why": "The role-suffix rule rewrites the LAST word only, so a longer phrase containing one of those words is untouched.",
+      "requirement": {
+        "name": "software development lifecycle",
+        "category": "domain_knowledge",
+        "importance": "required"
+      },
+      "spans": [
+        {
+          "text": "Worked as a software developer on internal tools",
+          "source": "experience",
+          "demonstrated": true
+        }
+      ],
+      "label": "NO_MATCH",
+      "expect": {
+        "relation": "none"
+      }
+    }
+  ]
+}

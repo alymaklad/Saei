@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sa'ei — Applications</title>
+<link rel="stylesheet" href="tailwind.css">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/png" href="assets/saei-logo.png">
+</head>
+<body data-page="applications">
+<main id="page">
+  <div class="flex flex-col space-y-6">
+
+    <div class="flex flex-col justify-between gap-6 xl:flex-row xl:items-end">
+      <div>
+        <h1 class="sa-page-title">Applications Pipeline &amp; Explainable Audit</h1>
+        <p class="sa-page-desc">Track drafted, tailored and submitted applications, with requirement-by-requirement scoring and no black-box deductions.</p>
+      </div>
+      <div class="flex items-center gap-4 self-start rounded-2xl bg-surface-container-low p-3 pl-5 shadow-sm xl:self-auto">
+        <div>
+          <span class="block text-label-sm text-on-surface-variant">Tailored CVs</span>
+          <span class="text-headline-sm font-bold text-on-surface" id="hdr-tailored">&mdash;</span>
+        </div>
+        <div class="h-10 w-px bg-surface-container-highest"></div>
+        <div>
+          <span class="block text-label-sm text-on-surface-variant">Review priority</span>
+          <span class="text-headline-sm font-bold text-primary"><span id="hdr-pending">&mdash;</span> actionable</span>
+        </div>
+        <a href="search.html" class="sa-btn-primary ml-2"><span class="ms text-[18px]">bolt</span>Run search</a>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-3 shadow-sm lg:flex-row lg:items-center">
+      <div class="sa-tabs" id="status-tabs">
+        <button type="button" class="sa-tab is-active" data-filter="all">All <span class="opacity-70" data-count="all"></span></button>
+        <button type="button" class="sa-tab" data-filter="pending_review">Review needed <span class="opacity-70" data-count="pending_review"></span></button>
+        <button type="button" class="sa-tab" data-filter="tailored">Tailored <span class="opacity-70" data-count="tailored"></span></button>
+        <button type="button" class="sa-tab" data-filter="applied">Submitted <span class="opacity-70" data-count="applied"></span></button>
+      </div>
+      <div class="flex flex-1 flex-col gap-2 sm:flex-row">
+        <label class="relative flex-1">
+          <span class="ms pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant">search</span>
+          <input type="text" id="app-filter" class="sa-input pl-9" placeholder="Filter by company or title&hellip;">
+        </label>
+        <div class="sa-select-wrap">
+          <select id="score-filter" class="sa-select" aria-label="Minimum match">
+            <option value="0">Any match</option>
+            <option value="0.5">Match ≥ 50%</option>
+            <option value="0.75">Match ≥ 75%</option>
+            <option value="0.85">Match ≥ 85%</option>
+          </select>
+        </div>
+        <div class="sa-select-wrap">
+          <select id="source-filter" class="sa-select" aria-label="Source">
+            <option value="">All sources</option>
+          </select>
+        </div>
+        <div class="sa-select-wrap">
+          <select id="sort-select" class="sa-select" aria-label="Sort">
+            <option value="match_score">Best match</option>
+            <option value="ats_score">Best ATS</option>
+            <option value="date_created">Newest</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
+      <!-- Stream -->
+      <div class="flex flex-col space-y-6 xl:col-span-7">
+        <div class="overflow-hidden rounded-3xl bg-surface-container-low shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
+            <div class="flex items-center gap-3">
+              <h2 class="text-headline-md font-bold text-on-surface">Active Stream</h2>
+              <span class="sa-chip-teal" id="selection-chip" hidden></span>
+            </div>
+            <span class="text-label-sm text-on-surface-variant" id="sort-label"></span>
+          </div>
+          <div class="flex flex-col" id="app-list">
+            <p class="sa-empty">Loading&hellip;</p>
+          </div>
+          <div class="flex items-center justify-between gap-4 px-6 py-4">
+            <span class="text-label-sm text-on-surface-variant" id="page-info"></span>
+            <div class="flex items-center gap-2">
+              <button type="button" class="sa-btn sa-btn-sm" id="page-prev">Prev</button>
+              <span class="text-label-sm font-semibold text-on-surface" id="page-num"></span>
+              <button type="button" class="sa-btn sa-btn-sm" id="page-next">Next</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sa-card">
+          <div class="mb-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="ms text-primary">query_stats</span>
+              <h3 class="sa-card-title">Sa'ei Career Alignment Vector</h3>
+            </div>
+            <span class="text-label-sm font-semibold text-secondary" id="vector-scope"></span>
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div class="rounded-2xl bg-surface-container-low p-4">
+              <span class="block text-label-sm text-on-surface-variant">Average match</span>
+              <span class="text-headline-lg font-bold text-on-surface" id="vec-match">&mdash;</span>
+              <div class="sa-progress mt-3"><div class="bg-primary" id="vec-match-bar" style="width:0%"></div></div>
+            </div>
+            <div class="rounded-2xl bg-surface-container-low p-4">
+              <span class="block text-label-sm text-on-surface-variant">Average ATS (best CV)</span>
+              <span class="text-headline-lg font-bold text-on-surface" id="vec-ats">&mdash;</span>
+              <div class="sa-progress mt-3"><div class="bg-secondary" id="vec-ats-bar" style="width:0%"></div></div>
+            </div>
+            <div class="rounded-2xl bg-surface-container-low p-4">
+              <span class="block text-label-sm text-on-surface-variant">Share tailored</span>
+              <span class="text-headline-lg font-bold text-on-surface" id="vec-tailored">&mdash;</span>
+              <div class="sa-progress mt-3"><div class="bg-tertiary" id="vec-tailored-bar" style="width:0%"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Audit panel -->
+      <aside class="sa-card xl:sticky xl:top-24 xl:col-span-5" id="audit-panel">
+        <p class="sa-empty">Select an application to audit it.</p>
+      </aside>
+    </div>
+  </div>
+</main>
+
+<div class="modal-overlay" id="why-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="why-modal-title">
+    <div class="modal-header">
+      <div class="modal-header-main">
+        <span class="modal-score-value" id="why-score-value">&mdash;</span>
+        <span class="rating-badge" id="why-rating-badge"></span>
+        <span class="modal-score-label" id="why-modal-title">ATS score breakdown</span>
+      </div>
+      <button type="button" class="modal-close" id="why-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-tabs">
+      <button type="button" class="modal-tab active" data-tab="original">Original CV</button>
+      <button type="button" class="modal-tab" data-tab="tailored">Tailored CV</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-split">
+        <div id="why-doc-pane"></div>
+        <div>
+          <div class="score-pillars" id="why-pillars"></div>
+          <div class="keyword-section">
+            <div class="keyword-section-title">Matched keywords</div>
+            <div class="keyword-chips" id="why-matched-chips"></div>
+          </div>
+          <div class="keyword-section">
+            <div class="keyword-section-title">Missing keywords</div>
+            <div class="keyword-chips" id="why-missing-chips"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="shell.js"></script>
+<script src="config.js"></script>
+<script src="why-modal.js"></script>
+<script src="ui.js"></script>
+<script src="applications.js"></script>
+</body>
+</html>

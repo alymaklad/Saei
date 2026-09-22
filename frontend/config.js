@@ -42,7 +42,7 @@ async function loadNavStatus() {
       pill.textContent = "Dry run — no live actions";
       pill.className = "pill pill-warn";
     } else {
-      pill.textContent = "Live";
+      pill.textContent = "Agent active";
       pill.className = "pill pill-ok";
     }
   } catch (e) {

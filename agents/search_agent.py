@@ -24,6 +24,7 @@ config and aren't Greenhouse/Lever, so they can never be whitelisted for
 auto-submit (see WHITELISTABLE_SOURCES), same as google_jobs/generic.
 """
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -109,7 +110,24 @@ def _matches_position(title: str, position: str) -> bool:
     return query_tokens.issubset(_position_tokens(title))
 
 
-def _filter_relevant(jobs: list[dict], position: str, seniority: str) -> list[dict]:
+def _matches_any_position(title: str, target_roles: list[str]) -> bool:
+    """OR across every expanded role phrase (agents/query_expansion_agent.py).
+
+    This is the broadened form of _matches_position: a title only had to match
+    the single typed Position before, which is what silently excluded
+    "Backend Developer" from a "Software Engineer" search even when the JD was
+    a genuine fit. Matching ANY expanded phrase widens that considerably --
+    though note it's still a TITLE check, so a job whose title matches no
+    phrase at all is still missed here. That remaining gap is what the
+    ranking agent's semantic retrieval path exists to close (see
+    agents/ranking_agent.py::semantic_retrieval_path).
+    """
+    if not target_roles:
+        return True  # nothing to filter against -- keep everything
+    return any(_matches_position(title, role) for role in target_roles)
+
+
+def _filter_relevant(jobs: list[dict], target_roles: list[str], seniority: str) -> list[dict]:
     """Position/seniority title filters, applied to a source's raw job list
     BEFORE _cap() truncates it -- capping first can silently discard every
     real match on a large board. Confirmed in practice: Greenhouse returns a
@@ -117,12 +135,37 @@ def _filter_relevant(jobs: list[dict], position: str, seniority: str) -> list[di
     545-job board, capping to the first 100 (a completely normal "Max
     results per site" setting) produced zero "Software Engineer" matches
     out of 38 real ones, because every single match sat past index 100 --
-    that's what was actually behind a real "search returns nothing" report."""
-    if position:
-        jobs = [j for j in jobs if _matches_position(j.get("title"), position)]
+    that's what was actually behind a real "search returns nothing" report.
+
+    `target_roles` is the expanded phrase list; passing a single-element list
+    reproduces the original single-phrase behavior exactly. Seniority remains
+    a HARD filter (deliberate -- it's also a ranking factor, but a "senior"
+    search still shouldn't surface internships)."""
+    if target_roles:
+        jobs = [j for j in jobs if _matches_any_position(j.get("title"), target_roles)]
     if seniority:
         jobs = [j for j in jobs if _matches_seniority(j.get("title"), seniority)]
     return jobs
+
+
+def _dedupe_by_url(jobs: list[dict]) -> list[dict]:
+    """Query expansion means the same posting can legitimately be returned by
+    several different phrases hitting the same site ("software engineer" and
+    "backend engineer" both surfacing one Wuzzuf listing). First occurrence
+    wins; everything after it is dropped before any downstream cost is spent
+    on it."""
+    seen = set()
+    out = []
+    for job in jobs:
+        url = job.get("url") or job.get("hostedUrl") or job.get("absolute_url")
+        if not url:
+            out.append(job)  # no URL to dedupe on -- keep rather than discard
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(job)
+    return out
 
 
 # Posted-date extraction: each source exposes "when was this posted"
@@ -571,20 +614,24 @@ def read_watchlist_sheet() -> list[dict]:
 
 
 def search_from_watchlist(
-    max_results_per_site: int | None = None, position: str = "", seniority: str = "",
+    max_results_per_site: int | None = None, target_roles: list[str] | None = None, seniority: str = "",
 ) -> list[dict]:
+    target_roles = target_roles or []
     results = []
     for row in read_watchlist_sheet():
         try:
             board = row.get("greenhouse_board_token")
             slug = row.get("lever_company_slug")
             if board:
-                jobs = _cap(_filter_relevant(search_greenhouse(board), position, seniority), max_results_per_site)
+                jobs = _cap(_filter_relevant(search_greenhouse(board), target_roles, seniority), max_results_per_site)
                 results += [{"source": "greenhouse", "watchlist_company": row.get("company"), **j} for j in jobs]
             elif slug:
-                jobs = _cap(_filter_relevant(search_lever(slug), position, seniority), max_results_per_site)
+                jobs = _cap(_filter_relevant(search_lever(slug), target_roles, seniority), max_results_per_site)
                 results += [{"source": "lever", "watchlist_company": row.get("company"), **j} for j in jobs]
             else:
+                # A watchlist row with neither a board token nor a slug names a
+                # company to search by keyword -- its own role_keyword column is
+                # the query, so expansion doesn't apply here.
                 query = f"{row.get('role_keyword', '')} {row.get('company', '')}".strip()
                 if query:
                     jobs = _cap(search_serpapi(query), max_results_per_site)
@@ -608,116 +655,290 @@ def run_search(
     seniority: str = "",
     max_results_per_site: int | None = None,
     max_age_days: int | None = None,
+    target_roles: list[str] | None = None,
+    trace=None,
+    include_title_mismatches: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Pulls from every configured free source and tags each job with its
-    source. `position` (a job title/keyword) is used three ways: as part of
-    the SerpAPI query, to build the real search URL for any dashboard-added
-    site whose site_type is a KNOWN_JOB_BOARD_TEMPLATES key (Wuzzuf,
-    Bayt.com -- skipped for this run if position is blank, since there's no
-    query to search with), and as a word-based title filter (see
-    _matches_position) applied to every other source (Greenhouse/Lever/
-    watchlist/dashboard-added sites) so one field controls relevance
-    everywhere. `seniority` (one of "intern",
-    "entry", "mid", "senior", "lead", "manager") works the same way -- also
-    folded into the SerpAPI query, and matched against titles via keyword
-    heuristics (see SENIORITY_KEYWORDS) for every other source. Leave both
-    blank to pull everything configured with no filtering.
+    Pulls from every configured free source and tags each job with its source.
+    This is the RETRIEVAL half of the matching pipeline, and it's deliberately
+    recall-biased -- cheap title/keyword signals only, no embeddings, no LLM.
+    Semantic retrieval and scoring happen afterward in agents/ranking_agent.py.
 
-    `max_results_per_site` caps the results kept from each individual source
-    (each Greenhouse board, Lever company, watchlist row, added site) --
-    None/0 means no cap. Applied AFTER the position/seniority filters above
-    for Greenhouse/Lever/watchlist sources, not before: capping first can
+    `target_roles` is the expanded phrase list from
+    agents/query_expansion_agent.py (e.g. "AI Engineer" ->
+    ["AI Engineer", "Machine Learning Engineer", "Generative AI Engineer", ...]).
+    When omitted, it defaults to just [position], which reproduces the exact
+    pre-expansion behavior -- so every existing caller keeps working unchanged.
+    It's used two ways, matching the two kinds of source here:
+
+      Role 1 (query-DEPENDENT: SerpAPI, Wuzzuf/SimplyHired/Wellfound/Bayt
+      templates, generic scraper) -- these need a literal query string to
+      fetch anything at all, so EVERY phrase becomes its own fetch and the
+      results are merged. SerpAPI is the exception: its free tier is
+      100 searches/month, so only the first
+      config.SERPAPI_EXPANSION_LIMIT phrases are ever sent there.
+
+      Role 2 (query-INDEPENDENT: Greenhouse/Lever boards, RemoteOK, We Work
+      Remotely, watchlist) -- these return everything regardless of query, so
+      the phrase list is used as a broadened title filter instead: a job is
+      kept if its title token-matches ANY phrase (see _matches_any_position).
+
+    `seniority` stays a HARD filter on titles (SENIORITY_KEYWORDS heuristics)
+    and is also folded into the SerpAPI query -- deliberately unchanged even
+    though seniority is now also a ranking factor, since a "senior" search
+    still shouldn't surface internships.
+
+    `max_results_per_site` caps results per individual source -- None/0 means
+    no cap. Applied AFTER the title filters, not before: capping first can
     silently discard every real match on a large board (confirmed in
     practice -- Greenhouse returns a company's jobs in a roughly
     alphabetical-by-title order, so a 100-job cap on a 545-job board zeroed
     out all 38 real "Software Engineer" matches, none of which happened to
-    fall in the first 100 raw results). `max_age_days` drops jobs older than
-    that (Greenhouse/Lever/SerpAPI expose a real posted date; generic
-    scraped sites don't, so they're never excluded by this filter).
+    fall in the first 100 raw results). For expanded Role 1 sources the cap is
+    applied to that site's COMBINED across-phrases result set, not per phrase
+    -- otherwise a position expanding to 8 phrases would silently multiply the
+    user's configured per-site ceiling by 8.
 
-    Returns (jobs, source_errors). A single dead/misconfigured board (e.g. a
-    Lever slug that 404s) is skipped and reported in source_errors instead of
-    aborting the whole run -- one bad source shouldn't block every other one.
+    `max_age_days` drops jobs older than that (Greenhouse/Lever/RemoteOK/WWR/
+    SerpAPI expose a real posted date; generic scraped sites don't, so they're
+    never excluded by this filter).
+
+    `include_title_mismatches` carries jobs whose TITLE matched no target role
+    forward anyway (capped at config.SEMANTIC_CANDIDATE_CAP per run) instead
+    of discarding them, so the caller's semantic retriever can rescue the ones
+    whose description genuinely fits the CV. Without it the semantic path is
+    dead weight -- this function would already have thrown away every job it
+    exists to recover. Seniority mismatches are still dropped outright, since
+    seniority remains a hard filter.
+
+    `trace` is an optional agents.search_trace.SearchTrace that records what
+    each source returned before and after each filter, for the Excel debug
+    report. Purely observational -- it never changes what this function does,
+    and defaults to a no-op.
+
+    Returns (jobs, source_errors), deduplicated by URL. A single
+    dead/misconfigured board (e.g. a Lever slug that 404s) is skipped and
+    reported in source_errors instead of aborting the whole run -- one bad
+    source shouldn't block every other one.
     """
-    broad = []  # everything except SerpAPI -- position-filtered by title below
+    if trace is None:
+        from agents.search_trace import NullTrace
+        trace = NullTrace()
+
+    # Default keeps every pre-expansion caller working identically.
+    if target_roles is None:
+        target_roles = [position] if position else []
+    # Blank/whitespace phrases would make _matches_any_position match
+    # everything (a blank query is "no filter"), silently disabling the title
+    # filter entirely -- drop them rather than let one bad LLM output do that.
+    target_roles = [r for r in (r.strip() for r in target_roles) if r]
+
+    broad = []  # everything except SerpAPI -- title-filtered below
+    semantic_candidates = []  # title-MISMATCHED jobs, for the semantic retriever
     source_errors = []
 
-    for board in config.GREENHOUSE_BOARD_TOKENS:
+    def _collect(source_name, identifier, fetch, tag):
+        """fetch -> filter -> cap, tagging each job with its source and
+        recording the count at every step for the debug report. Returns the
+        tagged jobs, or [] if the source failed (recorded, never raised).
+
+        Title-mismatched jobs are NOT thrown away when
+        `include_title_mismatches` is set -- they're set aside in
+        `semantic_candidates` so the semantic retriever downstream can still
+        rescue the ones whose description genuinely fits the CV. Seniority
+        mismatches ARE discarded outright, since seniority stays a hard filter.
+        """
+        started = time.perf_counter()
         try:
-            jobs = _cap(_filter_relevant(search_greenhouse(board), position, seniority), max_results_per_site)
-            broad += [{"source": "greenhouse", "board": board, **j} for j in jobs]
-        except requests.RequestException as exc:
-            source_errors.append({"source": "greenhouse", "identifier": board, "error": str(exc)})
+            raw = fetch()
+        except (requests.RequestException, ValueError, ET.ParseError) as exc:
+            source_errors.append({"source": source_name, "identifier": identifier, "error": str(exc)})
+            trace.record_error(source_name, identifier, exc)
+            trace.record_source(source_name, identifier,
+                                seconds=time.perf_counter() - started, error=str(exc))
+            return []
+        filtered = _filter_relevant(raw, target_roles, seniority)
+        capped = _cap(filtered, max_results_per_site)
+        trace.record_source(source_name, identifier, raw=len(raw),
+                            after_filter=len(filtered), after_cap=len(capped),
+                            seconds=time.perf_counter() - started)
+
+        kept_ids = {id(j) for j in filtered}
+        rescuable = []
+        for job in raw:
+            if id(job) in kept_ids:
+                continue
+            # Seniority is a hard filter; only TITLE mismatches are rescuable.
+            if seniority and not _matches_seniority(job.get("title"), seniority):
+                trace.record_retrieval({**tag, **job}, "token", "dropped",
+                                       f"seniority doesn't match '{seniority}' (hard filter)")
+                continue
+            if include_title_mismatches:
+                rescuable.append({**tag, **job})
+            else:
+                trace.record_retrieval({**tag, **job}, "token", "dropped",
+                                       "title matched no target role")
+        semantic_candidates.extend(rescuable)
+
+        for job in capped:
+            trace.record_retrieval({**tag, **job}, "token", "kept", "title matched a target role")
+        return [{**tag, **j} for j in capped]
+
+    # ---- Role 2: query-independent sources (full board, filtered by title) --
+
+    for board in config.GREENHOUSE_BOARD_TOKENS:
+        broad += _collect("greenhouse", board,
+                          lambda b=board: search_greenhouse(b),
+                          {"source": "greenhouse", "board": board})
 
     for company in config.LEVER_COMPANY_SLUGS:
-        try:
-            jobs = _cap(_filter_relevant(search_lever(company), position, seniority), max_results_per_site)
-            broad += [{"source": "lever", "company_slug": company, **j} for j in jobs]
-        except requests.RequestException as exc:
-            source_errors.append({"source": "lever", "identifier": company, "error": str(exc)})
+        broad += _collect("lever", company,
+                          lambda c=company: search_lever(c),
+                          {"source": "lever", "company_slug": company})
 
     # Always-on structured sources -- no per-user config needed, unlike the
     # Greenhouse/Lever loops above which depend on .env board tokens/slugs.
-    try:
-        jobs = _cap(_filter_relevant(search_remoteok(position), position, seniority), max_results_per_site)
-        broad += [{"source": "remoteok", **j} for j in jobs]
-    except (requests.RequestException, ValueError) as exc:  # ValueError -- unexpected JSON shape
-        source_errors.append({"source": "remoteok", "identifier": None, "error": str(exc)})
+    # search_remoteok takes no query param of its own here: it's filtered by
+    # the same _filter_relevant title pass as every other Role 2 source, so
+    # the expanded phrase list applies to it uniformly.
+    broad += _collect("remoteok", None, search_remoteok, {"source": "remoteok"})
+    broad += _collect("weworkremotely", None, search_weworkremotely, {"source": "weworkremotely"})
 
+    watchlist_started = time.perf_counter()
     try:
-        jobs = _cap(_filter_relevant(search_weworkremotely(), position, seniority), max_results_per_site)
-        broad += [{"source": "weworkremotely", **j} for j in jobs]
-    except (requests.RequestException, ET.ParseError) as exc:
-        source_errors.append({"source": "weworkremotely", "identifier": None, "error": str(exc)})
-
-    try:
-        broad += search_from_watchlist(max_results_per_site=max_results_per_site, position=position, seniority=seniority)
+        watchlist_jobs = search_from_watchlist(
+            max_results_per_site=max_results_per_site, target_roles=target_roles, seniority=seniority,
+        )
+        broad += watchlist_jobs
+        trace.record_source("watchlist", None, raw=len(watchlist_jobs),
+                            after_filter=len(watchlist_jobs), after_cap=len(watchlist_jobs),
+                            seconds=time.perf_counter() - watchlist_started)
+        for job in watchlist_jobs:
+            trace.record_retrieval(job, "token", "kept", "from Google Sheets watchlist")
     except Exception as exc:  # noqa: BLE001 -- e.g. bad service account creds
         source_errors.append({"source": "watchlist", "identifier": None, "error": str(exc)})
+        trace.record_error("watchlist", None, exc)
+        trace.record_source("watchlist", None,
+                            seconds=time.perf_counter() - watchlist_started, error=str(exc))
+
+    # ---- Dashboard-added sites: Role 2 for Greenhouse/Lever, Role 1 for the rest ----
 
     for site in get_configured_sites():
+        site_started = time.perf_counter()
         try:
             if site["site_type"] == "greenhouse":
-                jobs = _cap(_filter_relevant(search_greenhouse(site["identifier"]), position, seniority), max_results_per_site)
-                broad += [{"source": "greenhouse", "board": site["identifier"], "site_url": site["url"], **j}
-                          for j in jobs]
+                broad += _collect("greenhouse", site["identifier"],
+                                  lambda s=site: search_greenhouse(s["identifier"]),
+                                  {"source": "greenhouse", "board": site["identifier"],
+                                   "site_url": site["url"]})
             elif site["site_type"] == "lever":
-                jobs = _cap(_filter_relevant(search_lever(site["identifier"]), position, seniority), max_results_per_site)
-                broad += [{"source": "lever", "company_slug": site["identifier"], "site_url": site["url"], **j}
-                          for j in jobs]
+                broad += _collect("lever", site["identifier"],
+                                  lambda s=site: search_lever(s["identifier"]),
+                                  {"source": "lever", "company_slug": site["identifier"],
+                                   "site_url": site["url"]})
             elif site["site_type"] in KNOWN_JOB_BOARD_TEMPLATES:
-                # Wuzzuf/Bayt (or any future template site): the stored URL is
-                # just a display/landing link -- the real, query-filtered
-                # search URL depends on `position` and is rebuilt fresh here.
-                # No position set means no query to build a useful URL from,
-                # so this site is skipped for this run rather than scraping
-                # its unfiltered landing page.
-                built_url = KNOWN_JOB_BOARD_TEMPLATES[site["site_type"]]["build_url"](position)
-                if built_url:
-                    broad += search_generic_site(built_url, position=position, max_candidates=max_results_per_site)
+                # Role 1. The stored URL is just a display/landing link -- the
+                # real, query-filtered search URL depends on the phrase and is
+                # rebuilt fresh for EACH expanded role, then all phrases'
+                # results are merged, deduped, and capped as one set.
+                per_site = []
+                for role in target_roles:
+                    built_url = KNOWN_JOB_BOARD_TEMPLATES[site["site_type"]]["build_url"](role)
+                    if built_url:
+                        found_for_role = search_generic_site(built_url, position=role)
+                        per_site += found_for_role
+                        trace.record_source(site["site_type"], built_url, role_phrase=role,
+                                            raw=len(found_for_role), after_filter=len(found_for_role),
+                                            after_cap=len(found_for_role))
+                deduped = _cap(_dedupe_by_url(per_site), max_results_per_site)
+                for job in deduped:
+                    trace.record_retrieval(job, "role1", "kept", f"scraped from {site['site_type']}")
+                broad += deduped
             else:
-                broad += search_generic_site(site["url"], position=position, max_candidates=max_results_per_site)
+                # Role 1. A plain career page: scraped once per phrase, since
+                # its own link-narrowing is what `position` drives there.
+                per_site = []
+                for role in target_roles:
+                    found_for_role = search_generic_site(site["url"], position=role)
+                    per_site += found_for_role
+                    trace.record_source("generic", site["url"], role_phrase=role,
+                                        raw=len(found_for_role), after_filter=len(found_for_role),
+                                        after_cap=len(found_for_role))
+                if not target_roles:  # no phrases at all -- scrape unfiltered
+                    per_site = search_generic_site(site["url"])
+                deduped = _cap(_dedupe_by_url(per_site), max_results_per_site)
+                for job in deduped:
+                    trace.record_retrieval(job, "role1", "kept", "scraped from a configured site")
+                broad += deduped
         except requests.RequestException as exc:
             source_errors.append({"source": site["site_type"], "identifier": site["url"], "error": str(exc)})
+            trace.record_error(site["site_type"], site["url"], exc)
+            trace.record_source(site["site_type"], site["url"],
+                                seconds=time.perf_counter() - site_started, error=str(exc))
 
-    if position:
-        broad = [j for j in broad if _matches_position(j.get("title"), position)]
+    # Global title-filter safety net across the whole combined set.
+    if target_roles:
+        broad = [j for j in broad if _matches_any_position(j.get("title"), target_roles)]
 
     if seniority:
         broad = [j for j in broad if _matches_seniority(j.get("title"), seniority)]
 
-    serp_query = " ".join(part for part in (SENIORITY_LABELS.get(seniority, ""), position) if part).strip()
+    # ---- Role 1: SerpAPI, capped to a few phrases to protect its quota -----
+    #
+    # SerpAPI results are deliberately NOT re-filtered by title: the query
+    # already encodes the role + seniority, so Google Jobs' own matching is
+    # what narrowed them.
     serpapi_results = []
-    if serp_query:
+    serp_roles = target_roles[: max(0, config.SERPAPI_EXPANSION_LIMIT)] if target_roles else []
+    seniority_label = SENIORITY_LABELS.get(seniority, "")
+    for role in serp_roles:
+        serp_query = " ".join(part for part in (seniority_label, role) if part).strip()
+        if not serp_query:
+            continue
+        serp_started = time.perf_counter()
         try:
-            jobs = _cap(search_serpapi(serp_query), max_results_per_site)
-            serpapi_results = [{"source": "google_jobs", **j} for j in jobs]
+            raw = search_serpapi(serp_query)
+            jobs = _cap(raw, max_results_per_site)
+            serpapi_results += [{"source": "google_jobs", **j} for j in jobs]
+            trace.record_source("google_jobs", serp_query, role_phrase=role, raw=len(raw),
+                                after_filter=len(raw), after_cap=len(jobs),
+                                seconds=time.perf_counter() - serp_started)
+            for job in jobs:
+                trace.record_retrieval({"source": "google_jobs", **job}, "role1", "kept",
+                                       f"Google Jobs query: {serp_query}")
         except requests.RequestException as exc:
             source_errors.append({"source": "google_jobs", "identifier": serp_query, "error": str(exc)})
+            trace.record_error("google_jobs", serp_query, exc)
+            trace.record_source("google_jobs", serp_query, role_phrase=role,
+                                seconds=time.perf_counter() - serp_started, error=str(exc))
+    serpapi_results = _dedupe_by_url(serpapi_results)
 
     if max_age_days:
+        before_age = len(broad) + len(serpapi_results)
         broad = [j for j in broad if _within_max_age(j, max_age_days)]
         serpapi_results = [j for j in serpapi_results if _within_max_age(j, max_age_days)]
+        dropped = before_age - len(broad) - len(serpapi_results)
+        if dropped:
+            trace.record_source("(max-age filter)", f"{max_age_days} days",
+                                raw=before_age, after_filter=before_age - dropped,
+                                after_cap=before_age - dropped)
 
-    return broad + serpapi_results, source_errors
+    # Title-mismatched candidates ride along for the semantic retriever. Age
+    # filtering applies to them too, and the cap is global (not per source) so
+    # a run's embedding cost has a hard ceiling regardless of how many boards
+    # are configured.
+    rescuable = semantic_candidates
+    if include_title_mismatches and rescuable:
+        if max_age_days:
+            rescuable = [j for j in rescuable if _within_max_age(j, max_age_days)]
+        rescuable = _dedupe_by_url(rescuable)[: max(0, config.SEMANTIC_CANDIDATE_CAP)]
+
+    # Final cross-source dedupe: the same posting can legitimately arrive from
+    # two different sources (a company's own careers page and its Greenhouse
+    # board), not just from two expanded phrases.
+    final = _dedupe_by_url(broad + serpapi_results + rescuable)
+    trace.set_meta(retrieved_before_dedupe=len(broad) + len(serpapi_results),
+                   retrieved_after_dedupe=len(final),
+                   semantic_candidates_carried=len(rescuable))
+    return final, source_errors

@@ -3,156 +3,179 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Application Agent — Search</title>
+<title>Sa'ei — Search</title>
+<link rel="stylesheet" href="tailwind.css">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" href="assets/saei-logo.png">
 </head>
-<body>
-<div class="page">
+<body data-page="search">
+<main id="page">
+  <div class="flex flex-col space-y-8">
 
-  <header class="topbar">
-    <div class="brand">
-      <img src="assets/logo-128.png" alt="" class="brand-mark">
-      <h1>Job Application Agent</h1>
+    <div class="flex flex-col justify-between gap-6 xl:flex-row xl:items-end">
+      <div>
+        <span class="sa-chip-teal mb-3"><span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>Scheduler runs daily at 8am</span>
+        <h1 class="sa-page-title">Autonomous Search &amp; Market Radar</h1>
+        <p class="sa-page-desc">Configure what the crawlers look for and where. The scheduled run and the button here both use whatever is saved on this page.</p>
+      </div>
+      <div class="flex items-center gap-5">
+        <div class="text-right">
+          <span class="block text-label-sm text-on-surface-variant">Active coverage</span>
+          <span class="text-headline-sm font-bold text-on-surface"><span id="coverage-count">&mdash;</span> sites configured</span>
+        </div>
+        <button type="button" id="search-btn" class="sa-btn-primary px-6 py-3"><span class="ms text-[18px]">bolt</span>Launch Instant Discovery</button>
+      </div>
     </div>
-    <div id="status-pill" class="pill pill-muted">checking status&hellip;</div>
-  </header>
 
-  <nav class="mainnav">
-    <a href="index.html" class="navlink">Dashboard</a>
-    <a href="search.html" class="navlink active">Search</a>
-    <a href="settings.html" class="navlink">Settings</a>
-    <a href="cv.html" class="navlink">CV</a>
-    <a href="email.html" class="navlink">Email</a>
-    <a href="reports.html" class="navlink">Reports</a>
-    <a href="features.html" class="navlink">Features</a>
-  </nav>
+    <div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
 
-  <main class="narrow-main">
-    <section class="card">
-      <div class="card-header">
-        <h2>Position &amp; filters</h2>
-        <span class="card-sub">What to search for, and how to narrow it down</span>
+      <!-- Left: target model + pipelines -->
+      <div class="flex flex-col space-y-6 xl:col-span-5">
+        <section class="sa-card">
+          <div class="mb-5 flex items-start justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="ms text-primary">manage_search</span>
+              <h2 class="text-headline-md font-bold text-on-surface">Autonomous Target Model</h2>
+            </div>
+            <span class="sa-chip">Position &amp; filters</span>
+          </div>
+          <form id="position-form" class="flex flex-col gap-5">
+            <div>
+              <label for="position-input" class="sa-label">Target role profile</label>
+              <input type="text" id="position-input" class="sa-input text-body-md font-semibold" placeholder="e.g. Backend Engineer — blank searches everything">
+              <span class="sa-hint">Matches titles containing every word, in any order — "AI Engineer" also matches "Gen AI Engineer".</span>
+            </div>
+            <div>
+              <span class="sa-label">Seniority tier</span>
+              <div class="flex flex-wrap gap-2" id="seniority-pills"></div>
+              <select id="seniority-input" class="hidden" aria-hidden="true" tabindex="-1">
+                <option value="">Any</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label for="max-age-input" class="sa-label">Discovery freshness</label>
+                <div class="sa-select-wrap">
+                  <select id="max-age-input" class="sa-select">
+                    <option value="">Any time</option>
+                    <option value="1">Posted within 24 hours</option>
+                    <option value="3">Posted within 3 days</option>
+                    <option value="7">Posted within a week</option>
+                    <option value="14">Posted within 2 weeks</option>
+                    <option value="30">Posted within a month</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label for="max-results-input" class="sa-label">Max results per site</label>
+                <div class="sa-select-wrap">
+                  <select id="max-results-input" class="sa-select">
+                    <option value="">No limit</option>
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <details class="group rounded-xl bg-surface-container-low px-4 py-3 text-body-sm text-on-surface-variant">
+              <summary class="flex cursor-pointer list-none items-center gap-2 text-label-md font-semibold text-on-surface">
+                <span class="ms text-[18px] text-primary">info</span>How these filters are applied
+                <span class="ms ml-auto text-[18px] transition-transform group-open:rotate-180">expand_more</span>
+              </summary>
+              <p class="mt-2">Position/seniority are the search query for Google Jobs (needs <code>SERPAPI_KEY</code>) and a title filter on every Greenhouse/Lever/watchlist/site result; seniority is keyword-matched ("senior", "staff", "junior"), so both are heuristics, not exact.</p>
+              <p class="mt-2">Freshness only applies where a real posted date exists (Greenhouse, Lever, Google Jobs) — sites read by the best-effort scraper have no reliable date and are never excluded by it. Max results caps raw results pulled from each board before filtering. Saved to <code>.env</code>.</p>
+            </details>
+            <div class="flex items-center gap-3">
+              <button type="submit" class="sa-btn-primary"><span class="ms text-[18px]">save</span>Save filters</button>
+              <span id="position-message" class="save-message"></span>
+            </div>
+          </form>
+        </section>
+
+        <section class="sa-card">
+          <div class="mb-5 flex items-start justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="ms text-secondary">hub</span>
+              <h2 class="text-headline-md font-bold text-on-surface">Active Ingestion Pipelines</h2>
+            </div>
+            <span class="text-label-sm font-semibold text-secondary" id="sites-count"></span>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2" id="sites-body">
+            <p class="sa-empty sm:col-span-2">Loading&hellip;</p>
+          </div>
+          <form id="add-site-form" class="mt-3 flex flex-col gap-2 rounded-2xl border-2 border-dashed border-outline-variant/70 p-3 sm:flex-row">
+            <label for="site-url-input" class="sr-only">Website URL</label>
+            <input type="text" id="site-url-input" class="sa-input flex-1 bg-surface-container-lowest" placeholder="https://boards.greenhouse.io/acme or any careers page">
+            <button type="submit" class="sa-btn whitespace-nowrap"><span class="ms text-[18px]">add_link</span>Add career URL</button>
+          </form>
+          <span id="site-message" class="save-message mt-2 block"></span>
+          <details class="group mt-4 rounded-xl bg-secondary-container/40 px-4 py-3 text-body-sm text-on-secondary-fixed-variant">
+            <summary class="flex cursor-pointer list-none items-center gap-2 text-label-md font-semibold">
+              <span class="ms text-[18px]">shield</span>Which sites work, and how they're searched
+              <span class="ms ml-auto text-[18px] transition-transform group-open:rotate-180">expand_more</span>
+            </summary>
+            <p class="mt-2">Wuzzuf and Bayt.com are pre-added (both return real results to a plain, unauthenticated request) — remove either if you don't want it. LinkedIn and Indeed block that outright, so they're not included and won't work if added. For those boards the query is rebuilt from Position each run, so they're skipped when Position is blank.</p>
+            <p class="mt-2">Greenhouse/Lever URLs are detected automatically and searched via their public APIs. Any other URL uses a best-effort scraper that follows job-looking same-site links, so results can be noisier. Respect each site's Terms of Service before adding it.</p>
+          </details>
+        </section>
       </div>
-      <form id="position-form" class="form">
-        <div class="form-field">
-          <label for="position-input">Position</label>
-          <input type="text" id="position-input" placeholder="e.g. Backend Engineer — leave blank to search everything with no title filter">
-        </div>
-        <div class="form-field">
-          <label for="seniority-input">Seniority</label>
-          <select id="seniority-input">
-            <option value="">Any</option>
-          </select>
-        </div>
-        <div class="form-field">
-          <label for="max-age-input">Max time since posted</label>
-          <select id="max-age-input">
-            <option value="">Any time</option>
-            <option value="1">Past 24 hours</option>
-            <option value="3">Past 3 days</option>
-            <option value="7">Past week</option>
-            <option value="14">Past 2 weeks</option>
-            <option value="30">Past month</option>
-          </select>
-        </div>
-        <div class="form-field">
-          <label for="max-results-input">Max results per site</label>
-          <select id="max-results-input">
-            <option value="">No limit</option>
-            <option value="10">10</option>
-            <option value="25">25</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Save</button>
-          <span id="position-message" class="save-message"></span>
-        </div>
-      </form>
-      <p class="note">
-        Position/seniority are used as the search query for Google Jobs
-        (needs <code>SERPAPI_KEY</code>), and as a title filter applied to
-        every Greenhouse/Lever/watchlist/site result -- Position matches if a
-        title contains every word you typed, in any order (so "AI Engineer"
-        also matches "AI Software Engineer" or "Gen AI Engineer", not just
-        that exact phrase), and seniority via keyword matching (e.g.
-        "senior", "staff", "junior") -- so both are heuristics, not exact.
-        Max time since posted only applies where a real posted date is
-        available (Greenhouse, Lever, Google Jobs) -- sites searched with the
-        best-effort scraper below have no reliable date, so they're never
-        excluded by this filter. Max results per site caps how many raw
-        results are pulled from each individual board/site before filtering,
-        so it's mainly useful for large boards or to keep scraping polite.
-        Saved to <code>.env</code> — both the button below and the
-        scheduler's automatic 8am run use whatever's saved here.
-      </p>
-    </section>
 
-    <section class="card">
-      <div class="card-header">
-        <h2>Job boards</h2>
-        <span class="card-sub">Extra websites to search, on top of what's automatic below</span>
-      </div>
-      <form id="add-site-form" class="form">
-        <div class="form-field">
-          <label for="site-url-input">Website URL</label>
-          <input type="text" id="site-url-input" placeholder="https://boards.greenhouse.io/acme, https://jobs.lever.co/acme, or any careers page">
+      <!-- Right: run status + discoveries -->
+      <div class="flex flex-col space-y-6 xl:col-span-7">
+        <section class="sa-card">
+          <div class="mb-5 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="ms text-primary">explore</span>
+              <h2 class="text-headline-md font-bold text-on-surface">Crawler Exploration Status</h2>
+            </div>
+            <span class="sa-chip" id="run-state-chip">Idle</span>
+          </div>
+          <div class="rounded-2xl bg-surface-container-low p-5">
+            <div class="relative">
+              <div class="absolute left-[10%] right-[10%] top-4 h-1 rounded-full bg-surface-container-highest"></div>
+              <div class="relative grid grid-cols-5 gap-2" id="run-steps"></div>
+            </div>
+            <p id="search-message" class="save-message mt-5 block rounded-xl bg-surface-container-lowest px-4 py-3 font-mono text-label-md">
+              Ready. Runs the same pipeline as the 8am scheduler, on demand.
+            </p>
+          </div>
+        </section>
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-label-md uppercase tracking-wider text-on-surface-variant">Triage:</span>
+            <div class="sa-tabs" id="triage-tabs">
+              <button type="button" class="sa-tab is-active" data-filter="all">All discoveries</button>
+              <button type="button" class="sa-tab" data-filter="high">High match (≥75%)</button>
+              <button type="button" class="sa-tab" data-filter="tailored">Tailored</button>
+            </div>
+          </div>
+          <div class="sa-select-wrap">
+            <select id="discovery-sort" class="sa-select !py-2 text-label-md" aria-label="Sort">
+              <option value="date_created">Newest first</option>
+              <option value="match_score">Match index</option>
+              <option value="ats_score">ATS score</option>
+            </select>
+          </div>
         </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Add site</button>
-          <span id="site-message" class="save-message"></span>
+
+        <div class="flex flex-col space-y-4" id="discoveries">
+          <p class="sa-empty">Loading&hellip;</p>
         </div>
-      </form>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Site</th>
-              <th>Type</th>
-              <th>Added</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="sites-body">
-            <tr><td colspan="4" class="empty">Loading&hellip;</td></tr>
-          </tbody>
-        </table>
+        <div class="flex items-center justify-between rounded-2xl bg-surface-container-lowest px-5 py-4 shadow-sm">
+          <span class="text-body-sm text-on-surface-variant" id="discoveries-footer"></span>
+          <button type="button" class="sa-btn-ghost" id="discoveries-more">Load more &rarr;</button>
+        </div>
       </div>
-      <p class="note">
-        Wuzzuf and Bayt.com are pre-added below by default (both verified to
-        return real results with a plain, unauthenticated request) — remove
-        either one if you don't want it searched. LinkedIn and Indeed were
-        tested too and block that outright, so they're not included and
-        won't work if you add them manually either. For those two, the
-        search query is rebuilt from Position each run, so they're skipped
-        for a run where Position is blank. Add specific companies
-        (Greenhouse/Lever boards) or any other site here too — Greenhouse/Lever
-        URLs are detected automatically and searched via their public APIs,
-        same as the <code>.env</code>-configured boards. Any other URL is
-        searched with a best-effort scraper — it looks for same-site links
-        that look job-related, so results can be noisier and depend on the
-        site's structure. Respect each site's Terms of Service before adding it.
-      </p>
-    </section>
+    </div>
+  </div>
+</main>
 
-    <section class="card search-card">
-      <div class="card-header">
-        <h2>Search for jobs</h2>
-        <span class="card-sub">Runs the same pipeline as the 8am scheduler, on demand</span>
-      </div>
-      <div class="search-body">
-        <button type="button" id="search-btn" class="btn btn-primary">Search now</button>
-      </div>
-      <p id="search-message" class="save-message search-message"></p>
-    </section>
-  </main>
-
-</div>
-
+<script src="shell.js"></script>
 <script src="config.js"></script>
+<script src="ui.js"></script>
 <script src="search.js"></script>
 </body>
 </html>

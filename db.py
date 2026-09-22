@@ -45,8 +45,44 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record):
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
+def _migrate_schema():
+    """
+    Base.metadata.create_all() only creates *missing tables* -- for a table
+    that already exists (any real user's database, after the first run)
+    it silently does nothing when models.py grows a new column, since SQLite
+    has no "CREATE OR ALTER" equivalent create_all() can drive. Every time a
+    new persisted field is added to a model, a matching ADD COLUMN needs to
+    run here, guarded by checking PRAGMA table_info first so this stays a
+    no-op on a database that already has the column (including a brand-new
+    database, where create_all() above already created it with the full,
+    current column set). SQLite's ALTER TABLE only supports ADD COLUMN --
+    fine for this project so far, since no field has ever needed renaming or
+    dropping.
+    """
+    additions = {
+        "applications": {
+            "ats_breakdown": "TEXT",
+            "ats_explanation": "TEXT",
+            "tailored_ats_score": "FLOAT",
+            "tailored_ats_breakdown": "TEXT",
+            "tailored_ats_explanation": "TEXT",
+            "match_score": "FLOAT",
+            "match_breakdown": "TEXT",
+            "scoring_engine": "TEXT",
+        },
+    }
+    with engine.connect() as conn:
+        for table, columns in additions.items():
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for col, coltype in columns.items():
+                if col not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        conn.commit()
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    _migrate_schema()
     # Local import: avoids a module-load-time cycle (agents.search_agent only
     # imports db/models inside functions, not at module level, so this is
     # safe as long as it isn't hoisted to the top of this file).

@@ -1,8 +1,19 @@
 langgraph
 langchain
+# langchain-community is being sunset upstream, and its ChatOllama /
+# OllamaEmbeddings were deprecated in LangChain 0.3.1 (removal in 1.0.0).
+# langchain-ollama is their replacement and is what agents/llm.py and
+# agents/embeddings.py prefer; community is kept only as an import fallback
+# so an environment that hasn't reinstalled yet still runs.
+langchain-ollama
 langchain-community
+# Provides both ChatGoogleGenerativeAI and GoogleGenerativeAIEmbeddings.
 langchain-google-genai
 langchain-groq
+# OpenRouter's own LangChain package (ChatOpenRouter). Preferred over the
+# older ChatOpenAI + base_url override, which needs langchain-openai and
+# loses OpenRouter's routing/failover metadata.
+langchain-openrouter
 sqlalchemy
 python-dotenv
 pdfplumber
@@ -20,3 +31,5 @@ fastapi
 uvicorn
 python-multipart
 reportlab
+# Search debug reports (agents/search_trace.py) -- multi-sheet .xlsx per run.
+openpyxl

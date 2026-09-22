@@ -1,0 +1,91 @@
+{
+  "_about": [
+    "End-to-end score regression. Every figure here was produced by",
+    "compute_requirements_score() with the entailment call disabled, and is the",
+    "same worked example documented in MATCHING.md.",
+    "",
+    "This exists because the per-case file above pins relations, not arithmetic.",
+    "A change that leaves every relation correct and still moves the final",
+    "number — a weight, a points table, a bucket assignment, a redistribution",
+    "rule — is exactly the kind of regression a semantic refactor can cause",
+    "without touching a single matching rule."
+  ],
+  "cases": [
+    {
+      "id": "score_ai_engineer",
+      "family": "ai_ml",
+      "profile": {
+        "experience": [
+          {
+            "title": "AI Research Intern",
+            "organization": "Manipal Institute of Technology",
+            "start": "2025-07", "end": "2026-05", "is_professional": true,
+            "bullets": [
+              "Developed a multimodal pipeline that generates radiology reports from 3D chest CT scans using a vision-language model.",
+              "Trained a 3D ResNet-50 encoder with MoCo self-supervised learning and aligned CT features with radiology text using CLIP contrastive learning."
+            ]
+          },
+          {
+            "title": "Full-Stack Developer",
+            "organization": "Notopia",
+            "start": "2024-10", "end": "2025-01", "is_professional": true,
+            "bullets": [
+              "Contributed across the full application lifecycle, including Flutter frontend development, NestJS backend services and REST APIs, and PostgreSQL database integration."
+            ]
+          }
+        ],
+        "projects": [
+          {
+            "name": "Job Application Agent", "start": "2025-02", "end": "2026-01",
+            "bullets": [
+              "Built an autonomous multi-agent system of 8 specialized agents for job search, ATS scoring and CV rewriting, coordinated through a LangGraph orchestrator."
+            ]
+          }
+        ],
+        "education": [
+          {"degree": "Bachelor's degree", "field": "Computer Science",
+           "institution": "Ain Shams University", "start": "2022-09", "end": "2026-07"}
+        ],
+        "certifications": [],
+        "skills_claimed": ["Python", "SQL", "Computer Vision", "Kubernetes", "PyTorch"],
+        "seniority_self_described": "entry",
+        "_cached": true
+      },
+      "requirements": {
+        "requirements": [
+          {"name": "Python", "category": "technical_skill", "importance": "required"},
+          {"name": "Computer vision", "category": "domain_knowledge", "importance": "required"},
+          {"name": "SQL", "category": "technical_skill", "importance": "required"},
+          {"name": "Agentic AI solutions", "category": "domain_knowledge", "importance": "preferred"},
+          {"name": "Kubernetes", "category": "tool", "importance": "preferred"},
+          {"name": "Bachelor's degree", "category": "education", "importance": "required"}
+        ],
+        "years_experience_required": 3,
+        "seniority": "mid"
+      },
+      "expect": {
+        "score": 0.8156,
+        "rating": "Excellent",
+        "cv_years": 1.2,
+        "span_count": 13,
+        "demonstrated_span_count": 8,
+        "inactive_buckets": ["responsibilities"],
+        "missing_skills": [],
+        "rows": {
+          "Python":               {"relation": "implied", "location": "demonstrated", "credit": 0.9,  "points_earned": 9.0, "points": 10},
+          "Computer vision":      {"relation": "implied", "location": "demonstrated", "credit": 0.9,  "points_earned": 8.1, "points": 9},
+          "SQL":                  {"relation": "implied", "location": "demonstrated", "credit": 0.9,  "points_earned": 9.0, "points": 10},
+          "Agentic AI solutions": {"relation": "alias",   "location": "demonstrated", "credit": 1.0,  "points_earned": 9.0, "points": 9},
+          "Kubernetes":           {"relation": "exact",   "location": "claimed",      "credit": 0.65, "points_earned": 3.9, "points": 6},
+          "Bachelor's degree":    {"relation": "exact",   "location": "demonstrated", "credit": 1.0,  "points_earned": 9.0, "points": 9}
+        },
+        "buckets": {
+          "required_skills":  {"score": 0.9,   "weight": 0.5},
+          "experience":       {"score": 0.5,   "weight": 0.2222},
+          "preferred_skills": {"score": 0.86,  "weight": 0.1667},
+          "education":        {"score": 1.0,   "weight": 0.1111}
+        }
+      }
+    }
+  ]
+}

@@ -7,9 +7,16 @@ rem and diffs the whole environment on every launch, even when nothing
 rem changed -- often 10-60+ seconds by itself). This script just activates
 rem the existing "job-agent" env and starts the app directly.
 rem
-rem Use run_conda.bat instead of this one whenever you've changed
-rem environment.yml (added/removed/upgraded a package) -- this script does
-rem NOT sync dependencies, so it won't pick that up.
+rem Use run_conda.bat instead of this one whenever a DEPENDENCY has changed --
+rem this script does NOT sync them, so it won't pick that up.
+rem
+rem That means environment.yml *or* requirements.txt: environment.yml only
+rem says "pip install -r requirements.txt", so package changes actually live
+rem in requirements.txt and environment.yml itself rarely changes. A missing
+rem package usually shows up as an unexplained deprecation warning or an
+rem ImportError from a provider class, not as an obvious "not installed"
+rem error -- so if something looks stale after a git pull, run run_conda.bat
+rem once before debugging anything else.
 
 rem Always run from this script's own folder, regardless of where it's launched from.
 cd /d "%~dp0"
