@@ -1,5 +1,5 @@
-// Applications page: the full pipeline list with filters, and an audit panel
-// for the selected application (match breakdown + ATS requirement evidence).
+// Applications page: the pipeline list, a detail panel for the selected
+// application, and the send dialog (what used to be the Email page).
 
 const PAGE_SIZE = 8;
 
@@ -7,9 +7,10 @@ let allApps = [];
 let byId = {};
 let statusFilter = "all";
 let selectedId = null;
-let page = 0;
+let shown = PAGE_SIZE;
+let gmail = null;   // /api/email/status, loaded once
 
-// ---- "Why?" modal adapter (same shape as the Dashboard's) -----------------
+// ---- "Why?" modal adapter ------------------------------------------------------
 function openWhyModalForApplication(id) {
   const a = byId[id];
   if (!a) return;
@@ -24,7 +25,7 @@ function openWhyModalForApplication(id) {
 }
 window.openWhyModalForApplication = openWhyModalForApplication;
 
-// ---- filtering ------------------------------------------------------------
+// ---- filtering -----------------------------------------------------------------
 
 function matchesStatus(a, f) {
   if (f === "pending_review") return a.status === "pending_review";
@@ -35,263 +36,329 @@ function matchesStatus(a, f) {
 
 function visibleApps() {
   const q = document.getElementById("app-filter").value.trim().toLowerCase();
-  const minMatch = parseFloat(document.getElementById("score-filter").value) || 0;
-  const source = document.getElementById("source-filter").value;
-  const sortKey = document.getElementById("sort-select").value;
-  const list = allApps.filter((a) =>
-    matchesStatus(a, statusFilter)
-    && (!q || (a.title || "").toLowerCase().includes(q) || (a.company || "").toLowerCase().includes(q))
-    && (!minMatch || (a.match_score || 0) >= minMatch)
-    && (!source || a.source === source));
-  return sortApplicationsBy(list, sortKey);
+  const list = allApps.filter((a) => matchesStatus(a, statusFilter)
+    && (!q || (a.title || "").toLowerCase().includes(q) || (a.company || "").toLowerCase().includes(q)));
+  return sortApplicationsBy(list, document.getElementById("sort-select").value);
 }
 
-// ---- stream list ------------------------------------------------------------
+// ---- list ----------------------------------------------------------------------------
 
-function streamRow(a) {
+const STATUS_CHIP = {
+  pending_review: ["Ready to apply", "bg-primary-fixed/60 text-primary"],
+  cv_rewritten_notify_user: ["Tailored", "bg-tertiary-fixed/60 text-on-tertiary-fixed-variant"],
+  auto_submitted: ["Submitted", "bg-surface-container-high text-on-surface-variant"],
+  sent: ["Emailed", "bg-surface-container-high text-on-surface-variant"],
+};
+
+function statusPill(a) {
+  const [label, cls] = STATUS_CHIP[a.status] || [(a.status || "").replace(/_/g, " "), "bg-surface-container-high text-on-surface-variant"];
+  const when = isApplied(a) && a.date_applied ? ` ${fmtDate(a.date_applied)}` : "";
+  return `<span class="inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-label-sm normal-case tracking-normal ${cls}">${escapeHtml(label + when)}</span>`;
+}
+
+function listRow(a) {
   const selected = a.id === selectedId;
-  const tailoredUrl = hasTailored(a) ? cvDownloadUrl(a.cv_path) : null;
+  const p = pct(a.match_score);
   return `
     <button type="button" data-id="${a.id}"
-      class="flex w-full items-start gap-4 border-l-4 px-6 py-5 text-left transition-colors ${selected
-        ? "border-primary bg-surface-container-lowest"
-        : "border-transparent hover:bg-surface-container"}">
-      ${companyAvatar(a.company, "sa-avatar h-12 w-12")}
-      <div class="min-w-0 flex-1">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="text-headline-sm font-bold text-on-surface">${escapeHtml(a.title || "Untitled role")}</span>
-            ${matchChip(a.match_score)}
-            ${atsChip(a.ats_score, a.tailored_ats_score)}
-          </div>
-          ${selected ? `<span class="sa-chip-primary">Audit open <span class="ms text-[14px]">arrow_forward</span></span>` : ""}
-        </div>
-        <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body-sm text-on-surface-variant">
-          <span class="font-semibold text-on-surface">${escapeHtml(a.company || "Unknown company")}</span>
-          <span>•</span><span>${escapeHtml(a.source || "—")}</span>
-          <span>•</span><span>${timeAgo(a.date_created)}</span>
-        </div>
-        <div class="mt-2 flex flex-wrap items-center gap-2 text-label-sm text-on-surface-variant">
-          <span>Stage:</span>${statusChip(a.status)}
-          ${tailoredUrl ? `<span class="sa-chip"><span class="ms text-[14px]">description</span>Tailored CV ready</span>` : ""}
-        </div>
+      class="grid w-full grid-cols-[1fr_7rem_9rem_2.5rem] items-center gap-space-sm border-l-4 px-space-md py-space-md text-left transition-colors ${selected
+        ? "border-primary bg-surface-container-low"
+        : "border-transparent hover:bg-surface-container-low/60"}">
+      <div class="min-w-0">
+        <p class="truncate text-headline-sm text-on-surface">${escapeHtml(a.title || "Untitled role")}</p>
+        <p class="truncate text-body-sm text-on-surface-variant">${escapeHtml(a.company || "Unknown company")} <span class="text-outline-variant">•</span> ${escapeHtml(a.source || "—")}</p>
       </div>
+      <span class="flex items-center gap-1.5 text-label-md text-on-surface">${p !== null
+        ? `<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>${p}% <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">Match</span>`
+        : `<span class="text-on-surface-variant">—</span>`}</span>
+      <span>${statusPill(a)}</span>
+      <span class="ms text-right text-on-surface-variant">arrow_forward</span>
     </button>`;
 }
 
 function renderList() {
   const list = visibleApps();
   const el = document.getElementById("app-list");
-  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-  page = Math.min(page, pages - 1);
-
-  if (!list.length) {
-    el.innerHTML = `<p class="sa-empty px-6">${allApps.length ? "No applications match these filters." : "No applications yet — run a search to find roles."}</p>`;
-  } else {
-    el.innerHTML = list.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(streamRow).join(
-      `<div class="mx-6 h-px bg-surface-container-highest/70"></div>`);
-  }
-
-  const sortText = document.getElementById("sort-select").selectedOptions[0].textContent;
-  document.getElementById("sort-label").textContent = `Sorted by ${sortText.toLowerCase()}`;
-  document.getElementById("page-info").textContent = list.length
-    ? `Showing ${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, list.length)} of ${list.length}`
-    : "";
-  document.getElementById("page-num").textContent = `Page ${page + 1} of ${pages}`;
-  document.getElementById("page-prev").disabled = page === 0;
-  document.getElementById("page-next").disabled = page >= pages - 1;
-
-  renderVector(list);
+  el.innerHTML = list.length
+    ? list.slice(0, shown).map(listRow).join("")
+    : `<p class="sa-empty">${allApps.length ? "No applications match this view." : "No applications yet — run a search to find roles."}</p>`;
+  const footer = document.getElementById("list-footer");
+  footer.hidden = !list.length;
+  document.getElementById("list-count").textContent = `Showing ${Math.min(shown, list.length)} of ${list.length}`;
+  document.getElementById("list-more").hidden = shown >= list.length;
 }
 
 document.getElementById("app-list").addEventListener("click", (e) => {
   const row = e.target.closest("button[data-id]");
-  if (!row) return;
-  selectApplication(Number(row.dataset.id));
+  if (row) select(Number(row.dataset.id));
 });
+document.getElementById("list-more").addEventListener("click", () => { shown += PAGE_SIZE; renderList(); });
+document.getElementById("app-filter").addEventListener("input", () => { shown = PAGE_SIZE; renderList(); });
+document.getElementById("sort-select").addEventListener("change", renderList);
+bindTabs(document.getElementById("status-tabs"), (f) => { statusFilter = f; shown = PAGE_SIZE; renderList(); });
 
-document.getElementById("page-prev").addEventListener("click", () => { page -= 1; renderList(); });
-document.getElementById("page-next").addEventListener("click", () => { page += 1; renderList(); });
-["app-filter", "score-filter", "source-filter", "sort-select"].forEach((id) => {
-  document.getElementById(id).addEventListener(id === "app-filter" ? "input" : "change", () => { page = 0; renderList(); });
-});
-bindTabs(document.getElementById("status-tabs"), (f) => { statusFilter = f; page = 0; renderList(); });
+// ---- side widgets --------------------------------------------------------------------
 
-// ---- alignment vector ---------------------------------------------------------
+function renderSideWidgets() {
+  const tailored = allApps.filter(hasTailored);
+  const banner = document.getElementById("alignment-banner");
+  banner.hidden = !tailored.length;
+  document.getElementById("alignment-text").textContent =
+    `${tailored.length} position${tailored.length === 1 ? " has" : "s have"} a tailored CV, re-scored against the posting.`;
 
-function avg(values) {
-  const v = values.filter((x) => x !== null && x !== undefined);
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  // Per-source reach: how many roles each source produced and its best match.
+  const bySource = {};
+  allApps.forEach((a) => {
+    const s = a.source || "other";
+    bySource[s] = bySource[s] || { n: 0, best: null };
+    bySource[s].n += 1;
+    if (a.match_score != null && (bySource[s].best == null || a.match_score > bySource[s].best)) bySource[s].best = a.match_score;
+  });
+  const sources = Object.entries(bySource).sort((x, y) => y[1].n - x[1].n).slice(0, 3);
+  document.getElementById("source-scope").textContent = Object.keys(bySource).join(" · ");
+  document.getElementById("source-tiles").innerHTML = sources.map(([name, v], i) => `
+    <div class="rounded-lg bg-surface-container-low p-space-sm">
+      <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">${escapeHtml(name)}</span>
+      <p class="text-headline-sm text-on-surface">${v.n} Role${v.n === 1 ? "" : "s"}</p>
+      <p class="text-body-sm ${i === 0 ? "text-primary" : "text-on-surface-variant"}">Highest match: ${v.best == null ? "—" : pct(v.best) + "%"}</p>
+    </div>`).join("") || `<p class="sa-empty col-span-3">No sources yet.</p>`;
 }
 
-function renderVector(list) {
-  const m = pct(avg(list.map((a) => a.match_score)));
-  const t = pct(avg(list.map((a) => (hasTailored(a) ? a.tailored_ats_score : a.ats_score))));
-  const share = list.length ? Math.round((list.filter(hasTailored).length / list.length) * 100) : null;
-  const set = (id, v) => {
-    document.getElementById(id).textContent = v === null ? "—" : `${v}%`;
-    document.getElementById(`${id}-bar`).style.width = `${v || 0}%`;
-  };
-  set("vec-match", m);
-  set("vec-ats", t);
-  set("vec-tailored", share);
-  document.getElementById("vector-scope").textContent = `${list.length} application${list.length === 1 ? "" : "s"} in view`;
+// ---- detail panel ----------------------------------------------------------------------
+
+function topFactors(mb) {
+  // The three factors that contributed most to the match (score x weight).
+  return Object.values(mb || {})
+    .filter((c) => c && c.label)
+    .sort((x, y) => (y.score || 0) * (y.weight || 0) - (x.score || 0) * (x.weight || 0))
+    .slice(0, 3);
 }
 
-// ---- audit panel ------------------------------------------------------------
-
-const RELATION_TONE = {
-  none: "sa-chip-error",
-  exact: "sa-chip-teal",
-  alias: "sa-chip-teal",
-  subset: "sa-chip-amber",
-  implied: "sa-chip-amber",
-  semantic_support: "sa-chip-amber",
-};
-
-function requirementEvidence(breakdown) {
-  // Every requirement across every bucket, unmet ones first -- they're the
-  // actionable rows.
-  const items = [];
-  Object.values(breakdown || {}).forEach((bucket) => (bucket.items || []).forEach((it) => items.push(it)));
-  if (!items.length) return { html: "", met: 0, total: 0 };
-  const met = items.filter((it) => it.relation && it.relation !== "none").length;
-  items.sort((x, y) => (x.relation === "none" ? 0 : 1) - (y.relation === "none" ? 0 : 1));
-  const html = items.slice(0, 8).map((it) => {
-    const found = it.relation && it.relation !== "none";
-    const label = found ? relationShort(it) + (it.evidence_location === "claimed" ? ", listed only" : "") : "Not found";
-    return `
-      <div class="rounded-2xl p-3 ${found ? "bg-surface-container-low" : "bg-error-container/40"}">
-        <div class="flex items-start justify-between gap-2">
-          <div class="flex items-start gap-2">
-            <span class="ms mt-0.5 text-[18px] ${found ? "text-secondary" : "text-error"}">${found ? "check_circle" : "warning"}</span>
-            <span class="text-label-lg text-on-surface">${escapeHtml(it.name || "")}</span>
-          </div>
-          <span class="${RELATION_TONE[it.relation || "none"] || "sa-chip"} whitespace-nowrap">${escapeHtml(label)}</span>
-        </div>
-        ${found && it.evidence
-          ? `<p class="ml-7 mt-1 text-body-sm text-on-surface-variant">“${escapeHtml(String(it.evidence).slice(0, 180))}”</p>`
-          : `<p class="ml-7 mt-1 text-body-sm text-on-surface-variant">${escapeHtml(it.importance || "")} requirement · ${it.points_earned ?? 0}/${it.points ?? 0} pts</p>`}
-      </div>`;
-  }).join("");
-  return { html, met, total: items.length, more: Math.max(0, items.length - 8) };
+function matchedRequirementNames(breakdown, n) {
+  const names = [];
+  Object.values(breakdown || {}).forEach((b) => (b.items || []).forEach((it) => {
+    if (it.relation && it.relation !== "none" && it.name) names.push(it.name);
+  }));
+  return names.slice(0, n);
 }
 
-function legacyKeywords(breakdown) {
-  const kw = breakdown && breakdown.keyword_match;
-  if (!kw) return "";
-  const chips = (list, cls) => (list || []).map((s) => `<span class="${cls}">${escapeHtml(s)}</span>`).join(" ");
+function ring(score) {
+  const p = pct(score);
+  const r = 26, c = 2 * Math.PI * r;
+  const off = p === null ? c : c * (1 - p / 100);
   return `
-    <p class="text-body-sm text-on-surface-variant">Scored by the retired four-pillar engine — kept readable, not comparable with newer scores.</p>
-    <div class="mt-2 flex flex-wrap gap-1.5">${chips(kw.matched_skills, "sa-chip-teal")}${chips(kw.missing_skills, "sa-chip-error")}</div>`;
-}
-
-function renderAudit(a) {
-  const panel = document.getElementById("audit-panel");
-  if (!a) {
-    panel.innerHTML = `<p class="sa-empty">Select an application to audit it.</p>`;
-    return;
-  }
-  const tailored = hasTailored(a);
-  const bestAts = tailored ? a.tailored_ats_score : a.ats_score;
-  const breakdown = tailored ? a.tailored_ats_breakdown : a.ats_breakdown;
-  const ev = a.scoring_engine === "requirements" ? requirementEvidence(breakdown) : { html: "", met: 0, total: 0 };
-  const tailoredUrl = tailored ? cvDownloadUrl(a.cv_path) : null;
-
-  panel.innerHTML = `
-    <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0">
-        <span class="flex items-center gap-1 text-label-sm font-bold uppercase tracking-wider text-primary">
-          <span class="ms text-[16px]">shield</span>Transparent audit breakdown
-        </span>
-        <h2 class="mt-1 text-headline-lg font-bold tracking-tight text-on-surface">Explainable ATS &amp; Match Audit</h2>
-        <p class="text-body-sm text-on-surface-variant">${escapeHtml(a.title || "Untitled role")} • ${escapeHtml(a.company || "Unknown company")}</p>
-      </div>
-      ${companyAvatar(a.company, "sa-avatar h-10 w-10 text-label-lg")}
-    </div>
-
-    <div class="mt-5 grid grid-cols-2 gap-4 rounded-2xl bg-surface-container-low p-5">
-      ${scoreRing(bestAts, "text-primary", "ATS readiness", tailored ? `tailored CV (was ${pct(a.ats_score)}%)` : "your master CV")}
-      ${scoreRing(a.match_score, "text-secondary", "Match", "ranking agent")}
-    </div>
-
-    ${a.match_breakdown ? `
-    <div class="mt-6">
-      <h3 class="mb-3 text-headline-sm font-bold text-on-surface">Why this match score</h3>
-      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">${matchBreakdownTiles(a.match_breakdown)}</div>
-    </div>` : ""}
-
-    <div class="mt-6">
-      <div class="mb-3 flex items-center justify-between">
-        <h3 class="text-headline-sm font-bold text-on-surface">Evidence &amp; Requirement Breakdown</h3>
-        ${ev.total ? `<span class="text-label-sm font-semibold text-secondary">${ev.met} / ${ev.total} fulfilled</span>` : ""}
-      </div>
-      <div class="flex flex-col gap-2">
-        ${ev.html || legacyKeywords(breakdown) || `<p class="sa-empty">No ATS breakdown recorded for this job.</p>`}
-      </div>
-      ${breakdown ? `<button type="button" class="sa-btn-ghost mt-2" onclick="openWhyModalForApplication(${a.id})">
-        ${ev.more ? `See all ${ev.total} requirements` : "Open the full breakdown"} with your CV side by side &rarr;</button>` : ""}
-    </div>
-
-    <div class="mt-6 flex flex-wrap items-center gap-2">
-      ${a.status === "pending_review"
-        ? `<a href="email.html?application=${a.id}" class="sa-btn-primary"><span class="ms text-[18px]">send</span>Review &amp; send</a>` : ""}
-      ${tailoredUrl ? `<a href="${API_BASE}${tailoredUrl}" target="_blank" rel="noopener" class="sa-btn"><span class="ms text-[18px]">download</span>Tailored CV</a>` : ""}
-      <a href="${escapeHtml(a.url || "#")}" target="_blank" rel="noopener" class="sa-btn"><span class="ms text-[18px]">open_in_new</span>Posting</a>
+    <div class="relative h-20 w-20 flex-shrink-0">
+      <svg viewBox="0 0 64 64" class="h-20 w-20 -rotate-90">
+        <circle cx="32" cy="32" r="${r}" fill="none" stroke="currentColor" stroke-width="5" class="text-surface-container-highest"/>
+        <circle cx="32" cy="32" r="${r}" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"
+                stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" class="text-primary"/>
+      </svg>
+      <span class="absolute inset-0 flex items-center justify-center text-label-md font-semibold text-primary">${p === null ? "—" : p + "%"}</span>
     </div>`;
 }
 
-function selectApplication(id) {
+function renderDetail(a) {
+  const panel = document.getElementById("detail");
+  if (!a) { panel.innerHTML = `<p class="sa-empty">Select an application.</p>`; return; }
+
+  const tailored = hasTailored(a);
+  const cvUrl = cvDownloadUrl(a.cv_path);
+  const [statusLabel, statusCls] = STATUS_CHIP[a.status] || ["", ""];
+
+  let primary;
+  if (a.status === "pending_review") {
+    primary = `<button type="button" class="sa-btn-primary flex-1 py-3" id="submit-btn"><span class="ms text-[18px]">send</span>Submit Application<span class="ms text-[18px]">arrow_forward</span></button>`;
+  } else if (cvUrl) {
+    primary = `<a href="${API_BASE}${cvUrl}" target="_blank" rel="noopener" class="sa-btn-primary flex-1 py-3"><span class="ms text-[18px]">download</span>Download tailored CV</a>`;
+  } else {
+    primary = `<a href="${escapeHtml(a.url || "#")}" target="_blank" rel="noopener" class="sa-btn-primary flex-1 py-3"><span class="ms text-[18px]">open_in_new</span>Open posting</a>`;
+  }
+
+  const factors = topFactors(a.match_breakdown);
+  const breakdown = tailored ? a.tailored_ats_breakdown : a.ats_breakdown;
+  const keywords = matchedRequirementNames(breakdown, 4);
+
+  panel.innerHTML = `
+    <div class="mb-space-sm flex items-center justify-between gap-space-sm">
+      <div class="flex min-w-0 flex-wrap items-center gap-1.5 text-body-sm text-on-surface-variant">
+        <span class="rounded bg-surface-container px-2 py-0.5 text-label-sm normal-case tracking-normal text-on-surface">${escapeHtml(a.company || "Unknown company")}</span>
+        <span>${escapeHtml(a.source || "")}</span>
+      </div>
+      ${statusLabel ? `<span class="whitespace-nowrap rounded px-2 py-0.5 text-label-sm normal-case tracking-normal ${statusCls}">${escapeHtml(statusLabel)}</span>` : ""}
+    </div>
+    <h2 class="mb-space-md text-headline-md text-on-surface">${escapeHtml(a.title || "Untitled role")}</h2>
+    <div class="mb-space-lg flex gap-space-sm">
+      ${primary}
+      <a href="${escapeHtml(a.url || "#")}" target="_blank" rel="noopener" title="Open the posting"
+         class="flex w-11 items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest">
+        <span class="ms text-[20px]">open_in_new</span>
+      </a>
+    </div>
+
+    <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Overview</span>
+    <div class="mb-space-lg mt-space-sm grid grid-cols-2 gap-space-sm">
+      <div class="rounded-lg bg-surface-container-low p-space-sm">
+        <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">ATS score</span>
+        <p class="text-headline-md text-on-surface">${tailored ? pct(a.tailored_ats_score) + "%" : (a.ats_score != null ? pct(a.ats_score) + "%" : "—")}</p>
+        <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">${tailored ? `Tailored · was ${pct(a.ats_score)}%` : "Master CV"}</span>
+      </div>
+      <div class="rounded-lg bg-surface-container-low p-space-sm">
+        <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">Found</span>
+        <p class="text-headline-md text-on-surface">${fmtDate(a.date_created)}</p>
+        <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">via ${escapeHtml(a.source || "—")}</span>
+      </div>
+    </div>
+
+    <div class="mb-space-lg flex items-center justify-between gap-space-md rounded-xl bg-surface-container-low p-space-md">
+      <div>
+        <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Calibration score</span>
+        <p class="text-headline-md text-on-surface">${a.match_score != null ? pct(a.match_score) + "% Affinity" : "Not ranked"}</p>
+        <p class="text-body-sm text-on-surface-variant">How well this role fits your profile, from the ranking agent's weighted factors.</p>
+      </div>
+      ${ring(a.match_score)}
+    </div>
+
+    ${factors.length ? `
+    <div class="mb-space-lg">
+      <div class="mb-space-sm flex items-center justify-between">
+        <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Why this role? (deterministic reasoning)</span>
+        <span class="text-label-sm normal-case tracking-normal text-primary">${factors.length} core drivers</span>
+      </div>
+      <div class="flex flex-col gap-space-sm">
+        ${factors.map((f) => `
+          <div class="flex gap-space-sm rounded-lg bg-surface-container-low p-space-sm">
+            <span class="ms mt-0.5 text-[18px] ${(f.score || 0) >= 0.5 ? "text-secondary" : "text-error"}">${(f.score || 0) >= 0.5 ? "check_circle" : "error"}</span>
+            <div>
+              <p class="text-label-md font-semibold text-on-surface">${escapeHtml(f.label)} · ${pct(f.score)}%</p>
+              <p class="text-body-sm text-on-surface-variant">${escapeHtml(f.evidence || "")}</p>
+            </div>
+          </div>`).join("")}
+      </div>
+    </div>` : ""}
+
+    ${a.ats_breakdown ? `
+    <div class="mb-space-lg rounded-xl bg-surface-container-low p-space-md">
+      <div class="mb-1 flex items-start justify-between gap-space-sm">
+        <span class="flex items-center gap-2 text-label-md font-semibold text-on-surface"><span class="ms text-[18px] text-primary">description</span>${tailored ? "Tailored dossier generated" : "ATS evidence"}</span>
+        ${tailored ? `<span class="rounded bg-surface-container-high px-2 py-0.5 text-label-sm normal-case tracking-normal text-secondary">${pct(a.tailored_ats_score)}% ATS</span>` : ""}
+      </div>
+      ${keywords.length ? `<p class="text-body-sm text-on-surface-variant"><span class="text-on-surface">Requirements evidenced:</span> ${keywords.map(escapeHtml).join(", ")}.</p>` : ""}
+      <div class="mt-space-sm flex items-center justify-between">
+        <button type="button" class="flex items-center gap-1 text-label-md text-primary hover:underline" onclick="openWhyModalForApplication(${a.id})">Full requirement breakdown <span class="ms text-[16px]">north_east</span></button>
+        ${cvUrl ? `<a href="${API_BASE}${cvUrl}" target="_blank" rel="noopener" class="text-label-sm normal-case tracking-normal text-on-surface-variant hover:text-primary">Preview tailored PDF</a>` : ""}
+      </div>
+    </div>` : ""}
+
+    <p class="text-body-sm text-on-surface">Found ${fmtDate(a.date_created)}${a.date_applied ? ` · applied ${fmtDate(a.date_applied)}` : ""}</p>`;
+
+  const submit = document.getElementById("submit-btn");
+  if (submit) submit.addEventListener("click", () => openSend(a));
+}
+
+function select(id) {
   selectedId = id;
-  const a = byId[id];
-  const chip = document.getElementById("selection-chip");
-  chip.hidden = !a;
-  if (a) chip.textContent = `${a.company || "Unknown"} selected`;
-  renderAudit(a);
+  renderDetail(byId[id]);
   renderList();
 }
 
-// ---- load -----------------------------------------------------------------
+// ---- send dialog ------------------------------------------------------------------------
 
-async function loadApplications() {
+const sendModal = document.getElementById("send-modal");
+const sendMessage = document.getElementById("send-message");
+const sendBtn = document.getElementById("send-btn");
+let sending = null;
+
+function openSend(a) {
+  sending = a;
+  const title = a.title || "this role";
+  const company = a.company || "your company";
+  document.getElementById("send-title").textContent = `${title} · ${company}`;
+  document.getElementById("to-email").value = "";
+  document.getElementById("subject").value = `Application for ${title} at ${company}`;
+  document.getElementById("body").value =
+    `Hello,\n\nI'd like to apply for the ${title} position at ${company}. My CV is attached.\n\nBest regards,`;
+  // Mirrors the send endpoint in api.py: it attaches the application's own
+  // CV version when one was written, otherwise the master CV.
+  const cvUrl = cvDownloadUrl(a.cv_path);
+  document.getElementById("attachment").innerHTML = `
+    <span class="ms text-primary">picture_as_pdf</span>
+    <span class="flex-1 text-body-sm text-on-surface">${cvUrl ? "Tailored CV for this role" : "Your master CV"} is attached automatically</span>
+    ${cvUrl ? `<a href="${API_BASE}${cvUrl}" target="_blank" rel="noopener" class="text-label-md text-primary hover:underline">Preview</a>` : ""}`;
+  const warn = document.getElementById("gmail-warning");
+  if (gmail && !gmail.authenticated) {
+    warn.innerHTML = `Gmail isn't connected yet, so this can't be sent. Connect it under <a class="underline" href="settings.html#channels">Settings → Notifications &amp; channels</a>.`;
+    warn.classList.remove("hidden");
+  } else {
+    warn.classList.add("hidden");
+  }
+  sendMessage.textContent = "";
+  sendMessage.className = "save-message mr-auto";
+  sendBtn.disabled = false;
+  sendModal.hidden = false;
+  document.getElementById("to-email").focus();
+}
+
+function closeSend() { sendModal.hidden = true; sending = null; }
+document.getElementById("send-close").addEventListener("click", closeSend);
+document.getElementById("send-cancel").addEventListener("click", closeSend);
+sendModal.addEventListener("click", (e) => { if (e.target === sendModal) closeSend(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sendModal.hidden) closeSend(); });
+
+document.getElementById("send-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!sending) return;
+  sendBtn.disabled = true;
+  sendMessage.textContent = "Sending…";
+  sendMessage.className = "save-message mr-auto";
+  try {
+    const result = await postJSON(`/api/applications/${sending.id}/send-email`, {
+      to_email: document.getElementById("to-email").value,
+      subject: document.getElementById("subject").value,
+      body: document.getElementById("body").value,
+    });
+    sendMessage.textContent = result.status === "dry_run" ? "Logged (dry run — not actually sent)." : "Sent.";
+    sendMessage.className = "save-message save-success mr-auto";
+    const id = sending.id;
+    await loadApplications(id);
+    setTimeout(closeSend, 1200);
+  } catch (err) {
+    sendMessage.textContent = err.message || "Failed to send.";
+    sendMessage.className = "save-message save-error mr-auto";
+    sendBtn.disabled = false;
+  }
+});
+
+// ---- load ----------------------------------------------------------------------------------
+
+async function loadApplications(keepId) {
   try {
     allApps = await getJSON("/api/applications?limit=1000");
   } catch (e) {
-    document.getElementById("app-list").innerHTML = `<p class="sa-empty px-6">Could not reach the backend API.</p>`;
+    document.getElementById("app-list").innerHTML = `<p class="sa-empty">Could not reach the backend API.</p>`;
     return;
   }
   byId = {};
   allApps.forEach((a) => { byId[a.id] = a; });
-
   document.querySelectorAll("[data-count]").forEach((el) => {
-    const n = allApps.filter((a) => matchesStatus(a, el.dataset.count)).length;
-    el.textContent = `(${n})`;
+    el.textContent = allApps.filter((a) => matchesStatus(a, el.dataset.count)).length;
   });
-  document.getElementById("hdr-pending").textContent = allApps.filter((a) => a.status === "pending_review").length;
-  document.getElementById("hdr-tailored").textContent = allApps.filter(hasTailored).length;
+  renderSideWidgets();
 
-  const sources = [...new Set(allApps.map((a) => a.source).filter(Boolean))].sort();
-  document.getElementById("source-filter").insertAdjacentHTML("beforeend",
-    sources.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join(""));
-
-  // ?status=pending_review deep link (from the Dashboard's review queue).
-  const wanted = new URLSearchParams(location.search).get("status");
-  if (wanted) {
-    const tab = document.querySelector(`#status-tabs [data-filter="${CSS.escape(wanted)}"]`);
+  const params = new URLSearchParams(location.search);
+  const wanted = keepId || Number(params.get("id"));
+  if (!keepId && params.get("status")) {
+    const tab = document.querySelector(`#status-tabs [data-filter="${CSS.escape(params.get("status"))}"]`);
     if (tab) tab.click();
   }
-
-  // ?id=123 deep link (from Search's "Review & audit"): open that one, on
-  // the page of the list it sits on.
-  const wantedId = Number(new URLSearchParams(location.search).get("id"));
-  if (wantedId && byId[wantedId]) {
-    const idx = visibleApps().findIndex((a) => a.id === wantedId);
-    if (idx >= 0) page = Math.floor(idx / PAGE_SIZE);
-    selectApplication(wantedId);
+  if (wanted && byId[wanted]) {
+    const idx = visibleApps().findIndex((a) => a.id === wanted);
+    if (idx >= shown) shown = Math.ceil((idx + 1) / PAGE_SIZE) * PAGE_SIZE;
+    select(wanted);
     return;
   }
   const first = visibleApps()[0];
-  if (first) selectApplication(first.id); else renderList();
+  if (first) select(first.id); else { renderList(); renderDetail(null); }
 }
 
+getJSON("/api/email/status").then((s) => { gmail = s; }).catch(() => { gmail = null; });
 loadApplications();

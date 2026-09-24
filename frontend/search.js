@@ -1,50 +1,28 @@
-// Search tab: position query, job-board site list, the search-now button, and
-// the most recent discoveries.
+// Search page: the role query and filters, job-board management, running a
+// search, and the best recent matches.
 
 const SITE_TYPE_LABEL = {
   greenhouse: "Greenhouse",
   lever: "Lever",
-  generic: "Generic",
+  generic: "Career page",
   wuzzuf: "Job board",
   bayt: "Job board",
 };
 
-// ---- position ---------------------------------------------------------
-
 const positionInput = document.getElementById("position-input");
 const seniorityInput = document.getElementById("seniority-input");
-const seniorityPills = document.getElementById("seniority-pills");
 const maxAgeInput = document.getElementById("max-age-input");
 const maxResultsInput = document.getElementById("max-results-input");
 const positionMessage = document.getElementById("position-message");
 
-// The hidden <select> stays the source of truth (it's what gets saved); the
-// pills are just a friendlier way to set it.
-function renderSeniorityPills() {
-  seniorityPills.innerHTML = [...seniorityInput.options].map((o) => {
-    const on = o.value === seniorityInput.value;
-    return `<button type="button" data-value="${escapeHtml(o.value)}"
-      class="rounded-lg px-4 py-2 text-label-lg transition-colors ${on
-        ? "bg-primary text-on-primary shadow-sm"
-        : "bg-surface-container-high text-on-surface hover:bg-surface-container-highest"}">${escapeHtml(o.textContent)}</button>`;
-  }).join("");
-}
-
-seniorityPills.addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-value]");
-  if (!btn) return;
-  seniorityInput.value = btn.dataset.value;
-  renderSeniorityPills();
-});
+// ---- filters ------------------------------------------------------------------
 
 async function loadPosition() {
   try {
     const cfg = await getJSON("/api/search/config");
     positionInput.value = cfg.position_query || "";
-
     // Seniority options come from the backend (agents/search_agent.py's
-    // SENIORITY_LABELS) so the control can't drift out of sync with what
-    // the filter actually understands.
+    // SENIORITY_LABELS) so the control can't drift from what the filter knows.
     (cfg.seniority_levels || []).forEach(({ value, label }) => {
       const opt = document.createElement("option");
       opt.value = value;
@@ -56,31 +34,20 @@ async function loadPosition() {
     maxResultsInput.value = cfg.max_results_per_site ? String(cfg.max_results_per_site) : "";
   } catch (e) {
     positionMessage.textContent = "Could not reach the backend API.";
-    positionMessage.className = "save-message save-error";
+    positionMessage.className = "save-message save-error mt-space-sm block";
   }
-  renderSeniorityPills();
 }
 
-document.getElementById("position-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  positionMessage.textContent = "Saving…";
-  positionMessage.className = "save-message";
-  try {
-    await postJSON("/api/search/config", {
-      position_query: positionInput.value.trim(),
-      seniority_level: seniorityInput.value,
-      max_age_days: maxAgeInput.value ? parseInt(maxAgeInput.value, 10) : null,
-      max_results_per_site: maxResultsInput.value ? parseInt(maxResultsInput.value, 10) : null,
-    });
-    positionMessage.textContent = "Saved.";
-    positionMessage.className = "save-message save-success";
-  } catch (err) {
-    positionMessage.textContent = err.message || "Could not save.";
-    positionMessage.className = "save-message save-error";
-  }
-});
+function saveFilters() {
+  return postJSON("/api/search/config", {
+    position_query: positionInput.value.trim(),
+    seniority_level: seniorityInput.value,
+    max_age_days: maxAgeInput.value ? parseInt(maxAgeInput.value, 10) : null,
+    max_results_per_site: maxResultsInput.value ? parseInt(maxResultsInput.value, 10) : null,
+  });
+}
 
-// ---- sites --------------------------------------------------------------
+// ---- sources ------------------------------------------------------------------
 
 const sitesBody = document.getElementById("sites-body");
 const siteMessage = document.getElementById("site-message");
@@ -88,17 +55,14 @@ const siteMessage = document.getElementById("site-message");
 function siteTile(site) {
   const typeLabel = SITE_TYPE_LABEL[site.site_type] || site.site_type;
   return `
-    <div class="flex items-center justify-between gap-2 rounded-2xl bg-surface-container-low p-3.5">
-      <div class="flex min-w-0 items-center gap-2.5">
-        <span class="h-2 w-2 flex-shrink-0 rounded-full ${site.site_type === "generic" ? "bg-tertiary" : "bg-secondary"}"></span>
-        <div class="min-w-0">
-          <a href="${escapeHtml(site.url)}" target="_blank" rel="noopener"
-             class="block truncate text-label-lg text-on-surface hover:text-primary" title="${escapeHtml(site.url)}">${escapeHtml(site.label || site.url)}</a>
-          <span class="text-label-sm text-on-surface-variant">${escapeHtml(typeLabel)} · added ${fmtDate(site.date_added)}</span>
-        </div>
+    <div class="flex items-center justify-between gap-2 rounded-lg bg-surface-container-low px-space-sm py-2">
+      <div class="min-w-0">
+        <a href="${escapeHtml(site.url)}" target="_blank" rel="noopener" title="${escapeHtml(site.url)}"
+           class="block truncate text-label-md text-on-surface hover:text-primary">${escapeHtml(site.label || site.url)}</a>
+        <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">${escapeHtml(typeLabel)}</span>
       </div>
-      <button type="button" class="sa-icon-btn remove-site-btn" data-id="${site.id}" aria-label="Remove site" title="Remove">
-        <span class="ms text-[18px]">delete</span>
+      <button type="button" class="sa-icon-btn remove-site-btn" data-id="${site.id}" aria-label="Remove source" title="Remove">
+        <span class="ms text-[18px]">close</span>
       </button>
     </div>`;
 }
@@ -106,13 +70,12 @@ function siteTile(site) {
 async function loadSites() {
   try {
     const sites = await getJSON("/api/search/sites");
-    document.getElementById("coverage-count").textContent = sites.length;
-    document.getElementById("sites-count").textContent = `${sites.length} site${sites.length === 1 ? "" : "s"}`;
-    if (!sites.length) {
-      sitesBody.innerHTML = `<p class="sa-empty sm:col-span-2">No sites added yet.</p>`;
-      return;
-    }
-    sitesBody.innerHTML = sites.map(siteTile).join("");
+    const names = sites.map((s) => s.label || s.url);
+    document.getElementById("sources-summary").textContent = sites.length
+      ? `${sites.length} job board${sites.length === 1 ? "" : "s"} active (${names.join(", ")})`
+      : "none added yet — Greenhouse, Lever and the always-on feeds still run";
+    sitesBody.innerHTML = sites.length ? sites.map(siteTile).join("")
+      : `<p class="sa-empty col-span-3">No sources added yet.</p>`;
     sitesBody.querySelectorAll(".remove-site-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
@@ -120,23 +83,27 @@ async function loadSites() {
           await deleteJSON(`/api/search/sites/${btn.dataset.id}`);
           loadSites();
         } catch (err) {
-          siteMessage.textContent = err.message || "Could not remove site.";
+          siteMessage.textContent = err.message || "Could not remove source.";
           siteMessage.className = "save-message save-error mt-2 block";
           btn.disabled = false;
         }
       });
     });
   } catch (e) {
-    sitesBody.innerHTML = `<p class="sa-empty sm:col-span-2">Could not reach the backend API.</p>`;
+    document.getElementById("sources-summary").textContent = "could not reach the backend API";
   }
 }
+
+document.getElementById("manage-sources").addEventListener("click", () => {
+  const panel = document.getElementById("sources-panel");
+  panel.hidden = !panel.hidden;
+});
 
 document.getElementById("add-site-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = document.getElementById("site-url-input");
   const url = input.value.trim();
   if (!url) return;
-
   siteMessage.textContent = "Adding…";
   siteMessage.className = "save-message mt-2 block";
   try {
@@ -146,181 +113,160 @@ document.getElementById("add-site-form").addEventListener("submit", async (e) =>
     siteMessage.className = "save-message save-success mt-2 block";
     loadSites();
   } catch (err) {
-    siteMessage.textContent = err.message || "Could not add site.";
+    siteMessage.textContent = err.message || "Could not add source.";
     siteMessage.className = "save-message save-error mt-2 block";
   }
 });
 
-// ---- run status stepper ----------------------------------------------------
+// ---- run ----------------------------------------------------------------------
 // The run is one blocking request, so there are no real per-stage progress
-// events to show. While it's in flight the whole pipeline pulses as "running";
-// afterwards every stage reads done (or the run reads failed).
+// events. While it's in flight the bar is indeterminate; the step cards only
+// get numbers once the result is back.
 
 const RUN_STEPS = [
-  { icon: "manage_search", label: "Expanding query" },
-  { icon: "travel_explore", label: "Sources" },
-  { icon: "hub", label: "Semantic match" },
-  { icon: "fact_check", label: "ATS scoring" },
-  { icon: "flag", label: "Prioritizing" },
+  { key: "find", label: "Finding opportunities" },
+  { key: "match", label: "Matching against profile" },
+  { key: "prepare", label: "Preparing your results" },
 ];
 
-function renderRunSteps(state) {
-  document.getElementById("run-steps").innerHTML = RUN_STEPS.map((s, i) => {
-    let dot;
-    if (state === "done") {
-      dot = `<div class="flex h-9 w-9 items-center justify-center rounded-full bg-secondary text-on-secondary shadow-sm"><span class="ms text-[18px]">check</span></div>`;
-    } else if (state === "running") {
-      dot = `<div class="flex h-9 w-9 animate-pulse items-center justify-center rounded-full bg-primary text-on-primary shadow-md ring-4 ring-primary/20" style="animation-delay:${i * 200}ms"><span class="ms text-[18px]">${s.icon}</span></div>`;
-    } else if (state === "failed") {
-      dot = `<div class="flex h-9 w-9 items-center justify-center rounded-full bg-error-container text-error"><span class="ms text-[18px]">${s.icon}</span></div>`;
-    } else {
-      dot = `<div class="flex h-9 w-9 items-center justify-center rounded-full bg-surface-container-highest text-on-surface-variant"><span class="ms text-[18px]">${s.icon}</span></div>`;
-    }
-    return `<div class="flex flex-col items-center gap-2 text-center">${dot}<span class="text-label-sm font-semibold text-on-surface">${s.label}</span></div>`;
+function paintRun(state, detail = {}) {
+  const panel = document.getElementById("run-panel");
+  panel.hidden = false;
+  const bar = document.getElementById("run-bar");
+  const chip = document.getElementById("run-chip");
+  const title = document.getElementById("run-title");
+  if (state === "running") {
+    title.innerHTML = "Sa'ei is searching across your active sources&hellip;";
+    chip.innerHTML = `<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-tertiary"></span>Running`;
+    bar.style.width = "60%";
+    bar.classList.add("animate-pulse");
+  } else {
+    title.textContent = state === "failed" ? "The search finished with problems" : "Search complete";
+    chip.innerHTML = `<span class="h-1.5 w-1.5 rounded-full ${state === "failed" ? "bg-error" : "bg-secondary"}"></span>${state === "failed" ? "Needs attention" : "Done"}`;
+    bar.style.width = "100%";
+    bar.classList.remove("animate-pulse");
+  }
+  document.getElementById("run-steps").innerHTML = RUN_STEPS.map((s) => {
+    const text = detail[s.key];
+    const done = state !== "running";
+    return `
+      <div class="flex items-start gap-2 rounded-lg ${done ? "bg-surface-container-lowest/70" : "bg-surface-container-lowest"} p-space-sm">
+        <span class="ms mt-0.5 text-[18px] ${done ? (state === "failed" && s.key === "prepare" ? "text-error" : "text-primary") : "animate-pulse text-on-surface-variant"}">${done ? "check_circle" : "radio_button_unchecked"}</span>
+        <div>
+          <p class="text-label-md font-semibold text-on-surface">${s.label}</p>
+          <p class="text-body-sm text-on-surface-variant">${escapeHtml(text || (done ? "Done" : "In progress"))}</p>
+        </div>
+      </div>`;
   }).join("");
-  const chip = document.getElementById("run-state-chip");
-  const map = {
-    idle: ["sa-chip", "Idle"],
-    running: ["sa-chip-primary", "Running…"],
-    done: ["sa-chip-teal", "Last run complete"],
-    failed: ["sa-chip-error", "Last run had errors"],
-  };
-  chip.className = map[state][0];
-  chip.textContent = map[state][1];
 }
-renderRunSteps("idle");
 
-// ---- run search now -------------------------------------------------------
+function summarizeJobErrors(jobErrors) {
+  // The same failure (e.g. a rate limit) usually repeats across every job,
+  // but messages like "Used 197574 ... try again in 17m13s" carry per-request
+  // numbers -- group with digits blanked so those still collapse together.
+  const groups = new Map();
+  jobErrors.forEach((e) => {
+    const msg = e.error || "Unknown error";
+    const key = msg.replace(/\d+(\.\d+)?/g, "#");
+    if (!groups.has(key)) groups.set(key, { count: 0, sample: msg });
+    groups.get(key).count += 1;
+  });
+  return [...groups.values()].map(({ sample, count }) => {
+    // Rate-limit/quota messages are long and mostly marketing copy -- show
+    // just the useful lead-in.
+    const isRateLimit = /rate.?limit|quota|429/i.test(sample);
+    const shown = isRateLimit ? (sample.match(/Rate limit reached[^.]*\./i)?.[0] || sample.slice(0, 200)) : sample;
+    return count > 1 ? `${shown} (x${count})` : shown;
+  }).join("; ");
+}
 
 const searchBtn = document.getElementById("search-btn");
 const searchMessage = document.getElementById("search-message");
-const MSG_CLASS = "save-message mt-5 block rounded-xl bg-surface-container-lowest px-4 py-3 font-mono text-label-md";
 
-searchBtn.addEventListener("click", async () => {
+document.getElementById("position-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
   searchBtn.disabled = true;
-  renderRunSteps("running");
-  searchMessage.textContent = "Searching… this can take a few minutes (one LLM call per new job found).";
-  searchMessage.className = MSG_CLASS;
-
+  positionMessage.textContent = "";
+  try {
+    // Search uses what's saved, so save the filters as typed first.
+    await saveFilters();
+  } catch (err) {
+    positionMessage.textContent = err.message || "Could not save the filters.";
+    positionMessage.className = "save-message save-error mt-space-sm block";
+    searchBtn.disabled = false;
+    return;
+  }
+  paintRun("running");
+  searchMessage.innerHTML = `<span class="ms text-[16px]">info</span><span>Takes a few minutes — one model call per new job found.</span>`;
+  searchMessage.className = "mt-space-md flex items-start gap-2 text-body-sm text-on-surface-variant";
   try {
     const result = await postJSON("/api/search/run", {});
     const sourceErrors = result.source_errors || [];
     const jobErrors = result.errors || [];
-    const parts = [`${result.found} job(s) found`, `${result.processed.length} new`];
-    if (jobErrors.length) parts.push(`${jobErrors.length} failed`);
-    if (sourceErrors.length) parts.push(`${sourceErrors.length} source(s) unreachable`);
-    let text = parts.join(", ") + ".";
-    if (sourceErrors.length) {
-      text += " " + sourceErrors.map((e) => `${e.source}:${e.identifier || "?"} — ${e.error}`).join("; ");
-    }
-    if (jobErrors.length) {
-      // The same failure (e.g. a rate limit) usually repeats across every
-      // job, but messages like "Used 197574 ... try again in 17m13s" carry
-      // per-request numbers that make each one a unique string -- group by
-      // the message with digits blanked out so those still collapse together.
-      const groups = new Map();
-      jobErrors.forEach((e) => {
-        const msg = e.error || "Unknown error";
-        const key = msg.replace(/\d+(\.\d+)?/g, "#");
-        if (!groups.has(key)) groups.set(key, { count: 0, sample: msg });
-        groups.get(key).count += 1;
-      });
-      const summary = [...groups.values()]
-        .map(({ sample, count }) => {
-          // Rate-limit/quota messages are long and mostly marketing copy --
-          // show just the useful lead-in instead of the full raw text.
-          const isRateLimit = /rate.?limit|quota|429/i.test(sample);
-          const shown = isRateLimit
-            ? (sample.match(/Rate limit reached[^.]*\./i)?.[0] || sample.slice(0, 200))
-            : sample;
-          return count > 1 ? `${shown} (x${count})` : shown;
-        })
-        .join("; ");
-      text += ` Job failures: ${summary}`;
-    }
     const failed = jobErrors.length || sourceErrors.length;
-    searchMessage.textContent = text;
-    searchMessage.className = `${MSG_CLASS} ${failed ? "save-error" : "save-success"}`;
-    renderRunSteps(failed ? "failed" : "done");
-    loadDiscoveries();
-  } catch (e) {
-    searchMessage.textContent = e.message || "Search failed.";
-    searchMessage.className = `${MSG_CLASS} save-error`;
-    renderRunSteps("failed");
+    paintRun(failed ? "failed" : "done", {
+      find: `${result.found} role${result.found === 1 ? "" : "s"} found${sourceErrors.length ? ` · ${sourceErrors.length} source(s) unreachable` : ""}`,
+      match: `${result.processed.length} new after deduplication`,
+      prepare: jobErrors.length ? `${jobErrors.length} job(s) failed` : "Ready below and on Applications",
+    });
+    const notes = [];
+    if (sourceErrors.length) notes.push("Unreachable: " + sourceErrors.map((x) => `${x.source}:${x.identifier || "?"} — ${x.error}`).join("; "));
+    if (jobErrors.length) notes.push("Job failures: " + summarizeJobErrors(jobErrors));
+    if (notes.length) {
+      searchMessage.innerHTML = `<span class="ms text-[16px]">error</span><span>${escapeHtml(notes.join(" "))}</span>`;
+      searchMessage.className = "mt-space-md flex items-start gap-2 text-body-sm text-error";
+    } else {
+      searchMessage.innerHTML = `<span class="ms text-[16px]">check</span><span>Finished. New roles are ranked below and on the Applications page.</span>`;
+    }
+    loadSnapshots();
+  } catch (err) {
+    paintRun("failed", { prepare: "The search request failed" });
+    searchMessage.innerHTML = `<span class="ms text-[16px]">error</span><span>${escapeHtml(err.message || "Search failed.")}</span>`;
+    searchMessage.className = "mt-space-md flex items-start gap-2 text-body-sm text-error";
   } finally {
     searchBtn.disabled = false;
   }
 });
 
-// ---- discoveries ------------------------------------------------------------
+// ---- snapshots --------------------------------------------------------------------
 
-let discoveries = [];
-let triage = "all";
-let shown = 5;
+const SOURCE_ICON = { greenhouse: "eco", generic: "language", weworkremotely: "public", lever: "work" };
 
-function discoveryCard(a) {
+function snapshotCard(a) {
+  const p = pct(a.match_score);
+  const tone = p === null ? "text-on-surface-variant" : p >= 75 ? "text-primary" : "text-tertiary";
   return `
-    <article class="rounded-3xl bg-surface-container-lowest p-5 shadow-sm transition-shadow hover:shadow-md">
-      <div class="flex items-start gap-4">
-        ${companyAvatar(a.company, "sa-avatar h-12 w-12")}
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-start justify-between gap-2">
-            <div class="min-w-0">
-              <h3 class="text-headline-sm font-bold text-on-surface">${escapeHtml(a.title || "Untitled role")}</h3>
-              <div class="mt-1 flex flex-wrap items-center gap-2">
-                <span class="sa-chip-teal">${escapeHtml(a.source || "—")}</span>
-                <span class="text-label-lg text-on-surface">${escapeHtml(a.company || "Unknown company")}</span>
-              </div>
-            </div>
-            <div class="flex flex-col items-end gap-1">
-              ${matchChip(a.match_score)}
-              ${atsChip(a.ats_score, a.tailored_ats_score)}
-            </div>
-          </div>
-          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-3 text-label-sm text-on-surface-variant">
-              <span class="flex items-center gap-1"><span class="ms text-[16px]">schedule</span>${timeAgo(a.date_created)}</span>
-              ${statusChip(a.status)}
-            </div>
-            <div class="flex items-center gap-2">
-              <a href="applications.html?id=${a.id}" class="sa-btn sa-btn-sm"><span class="ms text-[16px]">visibility</span>Review &amp; audit</a>
-              <a href="${escapeHtml(a.url || "#")}" target="_blank" rel="noopener" class="sa-btn-primary sa-btn-sm"><span class="ms text-[16px]">open_in_new</span>Open posting</a>
-            </div>
-          </div>
-        </div>
+    <a href="applications.html?id=${a.id}" class="flex items-center gap-space-md rounded-xl bg-surface-container-lowest p-space-md shadow-soft transition-shadow hover:shadow-md">
+      <span class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container text-primary"><span class="ms">${SOURCE_ICON[a.source] || "work"}</span></span>
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-headline-sm text-on-surface">${escapeHtml(a.title || "Untitled role")} <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">· ${escapeHtml(a.company || "Unknown company")}</span></p>
+        <p class="flex flex-wrap items-center gap-x-2 text-body-sm text-on-surface-variant">
+          <span class="flex items-center gap-0.5"><span class="ms text-[16px]">travel_explore</span>${escapeHtml(a.source || "—")}</span>
+          <span>·</span><span>${timeAgo(a.date_created)}</span>
+          ${a.ats_score != null ? `<span>·</span><span class="font-mono text-label-sm normal-case tracking-normal">ATS ${pct(hasTailored(a) ? a.tailored_ats_score : a.ats_score)}%</span>` : ""}
+        </p>
       </div>
-    </article>`;
+      <div class="text-right">
+        <p class="text-headline-md ${tone}">${p === null ? "—" : p + "%"}</p>
+        <p class="text-label-sm uppercase tracking-wider text-on-surface-variant">Match</p>
+      </div>
+      <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container text-on-surface-variant"><span class="ms text-[18px]">chevron_right</span></span>
+    </a>`;
 }
 
-function renderDiscoveries() {
-  const sortKey = document.getElementById("discovery-sort").value;
-  let list = discoveries;
-  if (triage === "high") list = list.filter((a) => (a.match_score || 0) >= 0.75);
-  if (triage === "tailored") list = list.filter(hasTailored);
-  list = sortApplicationsBy(list, sortKey);
-
-  const el = document.getElementById("discoveries");
-  el.innerHTML = list.length
-    ? list.slice(0, shown).map(discoveryCard).join("")
-    : `<p class="sa-empty">${discoveries.length ? "Nothing in this view." : "No discoveries yet — launch a search."}</p>`;
-  document.getElementById("discoveries-footer").innerHTML =
-    `Showing <strong>${Math.min(shown, list.length)}</strong> of <strong>${list.length}</strong> recent discoveries`;
-  document.getElementById("discoveries-more").hidden = shown >= list.length;
-}
-
-async function loadDiscoveries() {
+async function loadSnapshots() {
+  const el = document.getElementById("snapshots");
   try {
-    discoveries = await getJSON("/api/applications?limit=100");
-    renderDiscoveries();
+    const apps = await getJSON("/api/applications?limit=50");
+    const best = sortApplicationsBy(apps, "match_score").slice(0, 5);
+    document.getElementById("snap-chip").textContent = best.length ? `Top ${best.length}` : "";
+    el.innerHTML = best.length ? best.map(snapshotCard).join("")
+      : `<p class="sa-empty">Nothing found yet — run a search.</p>`;
   } catch (e) {
-    document.getElementById("discoveries").innerHTML = `<p class="sa-empty">Could not reach the backend API.</p>`;
+    el.innerHTML = `<p class="sa-empty">Could not reach the backend API.</p>`;
   }
 }
 
-bindTabs(document.getElementById("triage-tabs"), (f) => { triage = f; shown = 5; renderDiscoveries(); });
-document.getElementById("discovery-sort").addEventListener("change", renderDiscoveries);
-document.getElementById("discoveries-more").addEventListener("click", () => { shown += 5; renderDiscoveries(); });
-
 loadPosition();
 loadSites();
-loadDiscoveries();
+loadSnapshots();

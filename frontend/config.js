@@ -39,10 +39,10 @@ async function loadNavStatus() {
   try {
     const status = await getJSON("/api/status");
     if (status.dry_run) {
-      pill.textContent = "Dry run — no live actions";
+      pill.textContent = "Dry run · nothing is sent";
       pill.className = "pill pill-warn";
     } else {
-      pill.textContent = "Agent active";
+      pill.textContent = "Autonomous mode · Active";
       pill.className = "pill pill-ok";
     }
   } catch (e) {

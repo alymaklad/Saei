@@ -1,167 +1,218 @@
-// Reports page: skill gaps, the latest news digest, and report history.
+// Reports page: headline numbers, a plain-language summary built from real
+// data, skill gaps, where roles come from, and every dispatch -- Telegram
+// reports and application emails -- in one stream.
 
-// ---- skill gaps -----------------------------------------------------------------
+let apps = [];
+let gaps = [];
+let stats = null;
+let dispatches = [];
+let dispatchFilter = "all";
+const PREVIEW = 5;
+let expanded = false;
 
-async function loadSkillGaps() {
-  const list = document.getElementById("skill-gaps-list");
-  try {
-    const gaps = await getJSON("/api/skill-gaps?limit=12");
-    document.getElementById("stat-gaps").textContent = gaps.length;
-    document.getElementById("gaps-chip").textContent = gaps.length ? `${gaps.length} gaps cataloged` : "";
-    if (!gaps.length) {
-      list.innerHTML = `<li class="sa-empty md:col-span-2">No recurring gaps yet.</li>`;
-      document.getElementById("stat-topgap").textContent = "0";
-      return;
-    }
-    const max = gaps[0].count;
-    const total = gaps.reduce((s, g) => s + g.count, 0);
-    document.getElementById("stat-gaps-sub").textContent = `${total} missing-skill mentions in total`;
-    document.getElementById("stat-topgap").textContent = gaps[0].count;
-    document.getElementById("stat-topgap-sub").textContent = `would credit "${gaps[0].skill}"`;
+// ---- stats + momentum -------------------------------------------------------
 
-    // Highlight the top one or two -- the highest-leverage things to learn.
-    const top = gaps.slice(0, 2);
-    const hl = document.getElementById("gap-highlight");
-    hl.classList.remove("hidden");
-    hl.classList.add("flex");
-    hl.innerHTML = `
-      <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary text-on-primary"><span class="ms">auto_graph</span></div>
-      <div class="flex-1">
-        <h3 class="text-headline-sm font-bold text-on-surface">High-leverage opportunity: ${top.map((g) => escapeHtml(g.skill)).join(" &amp; ")}</h3>
-        <p class="text-body-sm text-on-surface-variant">
-          ${top.length === 2
-            ? `These two were missing from <strong class="text-on-surface">${top[0].count}</strong> and <strong class="text-on-surface">${top[1].count}</strong> matched postings`
-            : `Missing from <strong class="text-on-surface">${top[0].count}</strong> matched postings`} —
-          the most common reason your CV lost points. Demonstrating them in a role or project on your Profile is what earns full credit.
-        </p>
-      </div>
-      <a href="profile.html" class="sa-btn-primary sa-btn-sm self-center whitespace-nowrap"><span class="ms text-[16px]">bolt</span>Add to profile</a>`;
-
-    list.innerHTML = gaps.map((g, i) => {
-      const w = Math.round((g.count / max) * 100);
-      const tone = i < 3 ? "bg-primary" : i < 6 ? "bg-primary-container/80" : "bg-primary-fixed-dim";
-      return `
-        <li>
-          <div class="mb-1.5 flex items-center justify-between gap-3">
-            <span class="flex items-center gap-2 text-label-lg text-on-surface"><span class="h-1.5 w-1.5 rounded-full ${tone}"></span>${escapeHtml(g.skill)}</span>
-            <span class="font-mono text-label-md text-on-surface">${g.count} job${g.count === 1 ? "" : "s"}</span>
-          </div>
-          <div class="sa-progress h-2"><div class="${tone}" style="width:${w}%"></div></div>
-        </li>`;
-    }).join("");
-  } catch (e) {
-    list.innerHTML = `<li class="sa-empty md:col-span-2">Could not reach the backend API.</li>`;
-  }
+function listJoin(items) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-// ---- news digest ------------------------------------------------------------------
+function paintStats() {
+  const sources = new Set(apps.map((a) => a.source).filter(Boolean));
+  if (stats) {
+    document.getElementById("stat-jobs").textContent = stats.total_jobs;
+    document.getElementById("stat-queue").textContent = stats.pending_review;
+  }
+  document.getElementById("stat-jobs-sub").textContent = sources.size
+    ? `Found across ${sources.size} source${sources.size === 1 ? "" : "s"}` : "";
+  document.getElementById("stat-high").textContent = apps.filter((a) => (a.match_score || 0) >= 0.8).length;
+  document.getElementById("stat-gaps").textContent = gaps.length;
+  document.getElementById("stat-gaps-sub").textContent = gaps.length ? listJoin(gaps.slice(0, 2).map((g) => g.skill)) : "None recurring yet";
+}
+
+function paintMomentum() {
+  const el = document.getElementById("momentum");
+  if (!apps.length) {
+    el.textContent = "No roles yet. Once a search has run, this summarises where your strongest matches are and which skills would open the most doors.";
+    return;
+  }
+  // Built from the data on this page -- every name and number below is real.
+  const best = sortApplicationsBy(apps, "match_score").filter((a) => a.match_score != null).slice(0, 3);
+  const titles = [...new Set(best.map((a) => a.title).filter(Boolean))];
+  const strong = apps.filter((a) => (a.match_score || 0) >= 0.75).length;
+  let html = titles.length
+    ? `Your strongest opportunities were roles like ${listJoin(titles.map((t) => `<strong class="text-on-surface">${escapeHtml(t)}</strong>`))}`
+      + ` — ${strong} of ${apps.length} matched at 75% or better.`
+    : `${apps.length} roles found so far.`;
+  if (gaps.length) {
+    const g = gaps[0];
+    const share = Math.round((g.count / apps.length) * 100);
+    html += ` Demonstrating <strong class="text-on-surface">${escapeHtml(g.skill)}</strong> would credit a requirement in`
+      + ` <span class="text-primary">${g.count} saved role${g.count === 1 ? "" : "s"} (${share}%)</span>`
+      + `${gaps[1] ? `, and ${escapeHtml(gaps[1].skill)} another ${gaps[1].count}` : ""}.`;
+  }
+  el.innerHTML = html;
+}
+
+// ---- news digest ----------------------------------------------------------------
 
 async function loadNews() {
-  const el = document.getElementById("news-content");
+  const box = document.getElementById("news-content");
+  const toggle = document.getElementById("digest-toggle");
   try {
     const digests = await getJSON("/api/news?limit=1");
     if (!digests.length) {
-      el.innerHTML = `<p class="sa-empty">No digest yet — runs weekly.</p>`;
+      toggle.hidden = true;
+      document.getElementById("digest-date").textContent = "No news digest yet — the weekly run hasn't happened.";
       return;
     }
     const d = digests[0];
-    el.innerHTML = `
-      <div class="mb-3 flex flex-wrap items-center gap-2">
-        <span class="rounded bg-secondary-container px-2 py-0.5 font-mono text-label-sm font-bold text-on-secondary-container">LATEST EDITION</span>
-        <span class="font-mono text-label-sm text-on-surface-variant">${d.date_created ? new Date(d.date_created).toLocaleString() : ""}</span>
-      </div>
-      <h3 class="mb-3 text-headline-md font-bold text-on-surface">${escapeHtml(d.field ? `${d.field} — weekly pulse` : "Weekly pulse")}</h3>
-      <div class="max-h-96 overflow-y-auto whitespace-pre-wrap pr-2 text-body-md leading-7 text-on-surface-variant">${escapeHtml(d.content)}</div>`;
+    box.textContent = d.content;
+    document.getElementById("digest-date").textContent =
+      `${d.field ? d.field + " · " : ""}${d.date_created ? fmtDate(d.date_created) : ""}`;
+    toggle.addEventListener("click", () => box.classList.toggle("hidden"));
   } catch (e) {
-    el.innerHTML = `<p class="sa-empty">Could not reach the backend API.</p>`;
+    toggle.hidden = true;
   }
 }
 
-// ---- report history ---------------------------------------------------------------
+// ---- skill gaps ---------------------------------------------------------------------
 
-const REPORTS_PREVIEW_COUNT = 6;
-let allReports = [];
-let reportFilter = "";
+function paintGaps() {
+  const list = document.getElementById("skill-gaps-list");
+  document.getElementById("gaps-chip").textContent = gaps.length ? `${gaps.length} key signals detected` : "";
+  if (!gaps.length) {
+    list.innerHTML = `<li class="sa-empty">No recurring gaps yet.</li>`;
+    return;
+  }
+  const base = apps.length || gaps[0].count;
+  const tones = ["bg-primary", "bg-primary-container", "bg-secondary", "bg-secondary-fixed-dim"];
+  list.innerHTML = gaps.slice(0, 6).map((g, i) => {
+    const share = Math.min(100, Math.round((g.count / base) * 100));
+    return `
+      <li>
+        <div class="mb-1.5 flex items-center justify-between gap-space-md">
+          <span class="flex items-center gap-2 text-label-md text-on-surface">${escapeHtml(g.skill)}
+            ${i === 0 ? `<span class="rounded bg-tertiary-fixed px-1.5 py-0.5 text-label-sm normal-case tracking-normal text-on-tertiary-fixed-variant">Priority gap</span>` : ""}</span>
+          <span class="font-mono text-body-sm text-on-surface-variant">${g.count} role${g.count === 1 ? "" : "s"} (${share}%)</span>
+        </div>
+        <div class="sa-progress"><div class="${tones[Math.min(i, tones.length - 1)]}" style="width:${share}%"></div></div>
+      </li>`;
+  }).join("");
+}
 
-function reportCardHTML(r) {
-  const failed = r.status === "failed";
-  const title = r.report_type === "daily" ? "Daily Summary" : "Weekly Digest";
-  const status = failed
-    ? `<span class="sa-chip-error">failed</span>`
-    : `<span class="sa-chip-teal"><span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>${escapeHtml(r.status)}${r.dry_run ? " (dry run)" : ""}</span>`;
+// ---- sources ring ---------------------------------------------------------------------
+
+function paintSources() {
+  const counts = {};
+  apps.forEach((a) => { const s = a.source || "other"; counts[s] = (counts[s] || 0) + 1; });
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const total = apps.length;
+  const text = document.getElementById("source-text");
+  const ring = document.getElementById("source-ring");
+  if (!total) { text.textContent = "No roles yet."; ring.innerHTML = ""; return; }
+  text.textContent = entries.map(([s, n]) => `${s} (${Math.round((n / total) * 100)}%)`).join(" · ");
+  const colors = ["#9c3e1e", "#6a5d43", "#d7c4a5", "#bc5633", "#8a726b"];
+  const r = 15.9, c = 2 * Math.PI * r;
+  let offset = 0;
+  ring.innerHTML = `<circle cx="21" cy="21" r="${r}" fill="none" stroke="#ece8e1" stroke-width="4"/>` + entries.map(([, n], i) => {
+    const len = (n / total) * c;
+    const seg = `<circle cx="21" cy="21" r="${r}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="4"
+      stroke-dasharray="${Math.max(0, len - 0.6).toFixed(2)} ${(c - len + 0.6).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"/>`;
+    offset += len;
+    return seg;
+  }).join("");
+}
+
+// ---- dispatches -----------------------------------------------------------------------
+
+function dispatchItem(d) {
+  const failed = d.status === "failed";
+  const state = failed ? "Failed" : d.dry_run ? "Logged (dry run)" : "Delivered";
   return `
-    <article class="sa-card">
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-surface-container pb-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded bg-surface-container-high px-2 py-0.5 font-mono text-label-sm font-bold uppercase text-on-surface">${escapeHtml(r.report_type)}</span>
-          ${status}
-        </div>
-        <div class="flex items-center gap-2 font-mono text-label-sm text-on-surface-variant">
-          <span class="ms text-[16px] text-secondary">send</span>
-          <time>${r.sent_at ? new Date(r.sent_at).toLocaleString() : "—"}</time>
-        </div>
+    <article class="px-space-lg py-space-md">
+      <div class="mb-1 flex items-center justify-between gap-space-sm">
+        <span class="flex items-center gap-1.5 text-label-sm uppercase tracking-wider ${d.kind === "email" ? "text-secondary" : "text-primary"}">
+          <span class="h-1.5 w-1.5 rounded-full ${failed ? "bg-error" : d.kind === "email" ? "bg-secondary" : "bg-primary"}"></span>${escapeHtml(d.label)}
+        </span>
+        <span class="font-mono text-body-sm ${failed ? "text-error" : "text-on-surface-variant"}">${state} ${d.at ? fmtDate(d.at) : ""}</span>
       </div>
-      <h4 class="text-headline-sm font-bold text-on-surface">${title}</h4>
-      ${r.error_message ? `<p class="mt-1 text-body-sm text-error">${escapeHtml(r.error_message)}</p>` : ""}
-      <details class="group mt-2">
-        <summary class="cursor-pointer list-none text-label-md font-semibold text-primary">
-          <span class="group-open:hidden">Show message &darr;</span><span class="hidden group-open:inline">Hide message &uarr;</span>
-        </summary>
-        <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-surface-container-low p-4 font-sans text-body-sm text-on-surface-variant">${escapeHtml(r.content)}</pre>
-      </details>
+      <h3 class="text-headline-sm text-on-surface">${escapeHtml(d.title)}</h3>
+      ${d.sub ? `<p class="text-body-sm text-on-surface-variant">${escapeHtml(d.sub)}</p>` : ""}
+      ${d.error ? `<p class="mt-1 text-body-sm text-error">${escapeHtml(d.error)}</p>` : ""}
+      ${d.content ? `
+        <details class="group mt-space-sm">
+          <summary class="flex cursor-pointer list-none items-center gap-1 text-label-md text-on-surface-variant hover:text-primary">
+            <span class="ms text-[16px]">visibility</span>Review transmission</summary>
+          <pre class="mt-space-sm max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-surface-container-low p-space-md font-sans text-body-sm text-on-surface-variant">${escapeHtml(d.content)}</pre>
+        </details>` : ""}
     </article>`;
 }
 
-function renderReports(reports, expanded) {
+function renderDispatches() {
   const el = document.getElementById("reports-list");
-  const viewAllRow = document.getElementById("reports-view-all-row");
-  const viewAllLabel = document.getElementById("reports-view-all-label");
-
-  if (!reports.length) {
-    el.innerHTML = `<p class="sa-empty">${allReports.length ? "No reports of this type." : "No reports sent yet — the daily and weekly triggers haven't run, or the scheduler isn't running."}</p>`;
-    viewAllRow.hidden = true;
+  const more = document.getElementById("reports-more");
+  const list = dispatches.filter((d) => dispatchFilter === "all" || d.kind === dispatchFilter);
+  if (!list.length) {
+    el.innerHTML = `<p class="sa-empty">${dispatchFilter === "email" ? "No application emails sent yet." : dispatchFilter === "telegram" ? "No Telegram reports yet — the scheduler sends them." : "Nothing dispatched yet."}</p>`;
+    more.hidden = true;
     return;
   }
+  const shown = expanded ? list : list.slice(0, PREVIEW);
+  el.innerHTML = shown.map(dispatchItem).join("");
+  more.hidden = shown.length >= list.length;
+  more.textContent = `Show older (${list.length - shown.length} more) →`;
+}
 
-  const visible = expanded ? reports : reports.slice(0, REPORTS_PREVIEW_COUNT);
-  el.innerHTML = visible.map(reportCardHTML).join("");
+document.getElementById("reports-more").addEventListener("click", () => { expanded = true; renderDispatches(); });
+bindTabs(document.getElementById("dispatch-tabs"), (f) => { dispatchFilter = f; expanded = false; renderDispatches(); });
 
-  if (!expanded && reports.length > REPORTS_PREVIEW_COUNT) {
-    viewAllLabel.textContent = `Load older reports (${reports.length - REPORTS_PREVIEW_COUNT} more)`;
-    viewAllRow.hidden = false;
+// ---- load ------------------------------------------------------------------------------
+
+async function load() {
+  const [s, a, g, r, e] = await Promise.allSettled([
+    getJSON("/api/stats"),
+    getJSON("/api/applications?limit=1000"),
+    getJSON("/api/skill-gaps?limit=12"),
+    getJSON("/api/reports?limit=50"),
+    getJSON("/api/emails?limit=100"),
+  ]);
+  if (s.status === "fulfilled") stats = s.value;
+  if (a.status === "fulfilled") apps = a.value;
+  if (g.status === "fulfilled") gaps = g.value;
+
+  const reports = r.status === "fulfilled" ? r.value : [];
+  const emails = e.status === "fulfilled" ? e.value : [];
+  dispatches = [
+    ...reports.map((x) => ({
+      kind: "telegram", at: x.sent_at, status: x.status, dry_run: x.dry_run,
+      label: x.report_type === "daily" ? "Application summary" : "News digest",
+      title: x.report_type === "daily" ? "Daily application summary" : "Weekly news digest",
+      sub: "Sent over Telegram", content: x.content, error: x.error_message,
+    })),
+    ...emails.map((x) => ({
+      kind: "email", at: x.sent_at, status: x.status, dry_run: x.dry_run,
+      label: "Application email",
+      title: x.subject,
+      sub: `To ${x.to_email}${x.job_title ? ` · ${x.job_title}${x.company ? " at " + x.company : ""}` : ""}`,
+      content: "", error: x.error_message,
+    })),
+  ].sort((x, y) => new Date(y.at || 0) - new Date(x.at || 0));
+
+  if (a.status === "rejected") {
+    document.getElementById("momentum").textContent = "Could not reach the backend API.";
   } else {
-    viewAllRow.hidden = true;
+    paintMomentum();
+  }
+  paintStats();
+  paintGaps();
+  paintSources();
+  if (r.status === "rejected" && e.status === "rejected") {
+    document.getElementById("reports-list").innerHTML = `<p class="sa-empty">Could not reach the backend API.</p>`;
+  } else {
+    renderDispatches();
   }
 }
 
-function applyReportFilter() {
-  const filtered = reportFilter ? allReports.filter((r) => r.report_type === reportFilter) : allReports;
-  renderReports(filtered, false);
-  document.getElementById("reports-view-all-btn").onclick = () => renderReports(filtered, true);
-}
-
-async function loadReports() {
-  const el = document.getElementById("reports-list");
-  try {
-    allReports = await getJSON("/api/reports?limit=50");
-    const delivered = allReports.filter((r) => r.status !== "failed").length;
-    document.getElementById("stat-delivered").textContent = delivered;
-    document.getElementById("stat-failed").textContent = allReports.length - delivered;
-    document.getElementById("stat-delivered-rate").textContent = allReports.length
-      ? `${Math.round((delivered / allReports.length) * 100)}% success` : "";
-    document.querySelector('#report-tabs [data-count=""]').textContent = `(${allReports.length})`;
-    const last = allReports.find((r) => r.sent_at);
-    document.getElementById("last-dispatch").textContent = last
-      ? `${last.report_type === "daily" ? "Daily summary" : "Weekly digest"} · ${timeAgo(last.sent_at)}` : "None yet";
-    applyReportFilter();
-  } catch (e) {
-    el.innerHTML = `<p class="sa-empty">Could not reach the backend API.</p>`;
-    document.getElementById("reports-view-all-row").hidden = true;
-  }
-}
-
-bindTabs(document.getElementById("report-tabs"), (f) => { reportFilter = f; applyReportFilter(); });
-
-loadSkillGaps();
+load();
 loadNews();
-loadReports();

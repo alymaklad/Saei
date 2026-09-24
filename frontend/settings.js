@@ -399,6 +399,7 @@ async function loadMatchingSettings() {
     refreshEmbeddingModelOptions();
     similarityThreshold.value = Math.round(s.cv_job_similarity_threshold * 100);
     matchScoreThreshold.value = Math.round(s.match_score_threshold * 100);
+    document.getElementById("match-score-range").value = matchScoreThreshold.value;
     geminiKeySet = s.gemini_api_key_set;
     updateEmbeddingHint();
   } catch (e) {
@@ -535,3 +536,89 @@ const sectionObserver = new IntersectionObserver((entries) => {
   });
 }, { rootMargin: "-30% 0px -60% 0px" });
 sectionTabs.forEach((t) => sectionObserver.observe(document.querySelector(t.getAttribute("href"))));
+
+// ---- 2026-09-24 layout: one Save for all three forms, extra slider ---------
+
+const matchRange = document.getElementById("match-score-range");
+matchRange.addEventListener("input", () => { matchScoreThreshold.value = matchRange.value; });
+matchScoreThreshold.addEventListener("input", () => { matchRange.value = matchScoreThreshold.value; });
+
+// Each form keeps its own endpoint and its own message next to its heading;
+// the page-level button just submits all three.
+document.getElementById("save-all").addEventListener("click", () => {
+  ["settings-form", "auto-apply-form", "matching-form"].forEach((id) => {
+    document.getElementById(id).requestSubmit();
+  });
+});
+
+// ---- Notifications & channels (Gmail moved here from the Email page) -------
+
+const connectBtn = document.getElementById("connect-btn");
+const connectMessage = document.getElementById("connect-message");
+
+function setChip(el, text, good) {
+  el.textContent = text;
+  el.className = `rounded px-1.5 py-0.5 text-label-sm normal-case tracking-normal ${good
+    ? "bg-secondary-container text-on-secondary-fixed-variant" : "bg-tertiary-fixed text-on-tertiary-fixed-variant"}`;
+}
+
+async function loadGmailStatus() {
+  const statusEl = document.getElementById("gmail-status");
+  const chip = document.getElementById("gmail-chip");
+  try {
+    const s = await getJSON("/api/email/status");
+    if (s.authenticated) {
+      statusEl.textContent = "Connected — Gmail is authorized to send.";
+      setChip(chip, "Connected", true);
+      connectBtn.innerHTML = `<span class="ms text-[16px]">sync</span>Reconnect`;
+    } else if (!s.credentials_configured) {
+      statusEl.textContent = "Not set up — no OAuth client file found yet (see below).";
+      setChip(chip, "Not set up", false);
+    } else {
+      statusEl.textContent = "Not connected yet.";
+      setChip(chip, "Not connected", false);
+    }
+  } catch (e) {
+    statusEl.textContent = "Could not reach the backend API.";
+  }
+}
+
+connectBtn.addEventListener("click", async () => {
+  connectBtn.disabled = true;
+  connectMessage.textContent = "Opening a browser tab for Google's consent screen…";
+  connectMessage.className = "mt-1 text-body-sm text-on-surface-variant";
+  try {
+    await postJSON("/api/email/authenticate", {});
+    connectMessage.textContent = "Connected.";
+    connectMessage.className = "mt-1 text-body-sm save-success";
+    await loadGmailStatus();
+  } catch (e) {
+    connectMessage.textContent = e.message || "Authentication failed.";
+    connectMessage.className = "mt-1 text-body-sm save-error";
+  } finally {
+    connectBtn.disabled = false;
+  }
+});
+
+async function loadTelegramStatus() {
+  const chip = document.getElementById("telegram-chip");
+  const note = document.getElementById("telegram-note");
+  try {
+    const s = await getJSON("/api/status");
+    if (s.telegram_configured === undefined) {
+      chip.textContent = "Unknown";
+      note.textContent = "Restart the API to see whether a bot is configured.";
+    } else if (s.telegram_configured) {
+      setChip(chip, "Configured", true);
+      note.textContent = s.dry_run ? "Dry run is on, so reports are logged rather than sent." : "";
+    } else {
+      setChip(chip, "Not configured", false);
+      note.innerHTML = "Set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> in <code>.env</code> to receive reports.";
+    }
+  } catch (e) {
+    chip.textContent = "Offline";
+  }
+}
+
+loadGmailStatus();
+loadTelegramStatus();

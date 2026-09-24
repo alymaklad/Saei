@@ -3,282 +3,88 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sa'ei — Dashboard</title>
+<title>Sa'ei — Home</title>
 <link rel="stylesheet" href="tailwind.css">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/png" href="assets/saei-logo.png">
 </head>
 <body data-page="dashboard">
 <main id="page">
-  <div class="flex flex-col space-y-8">
+  <div class="flex flex-col">
 
-    <!-- Welcome + CTAs -->
-    <div class="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+    <div class="mb-space-xl flex flex-col justify-between gap-space-lg md:flex-row md:items-end">
+      <div class="flex flex-col">
+        <span class="sa-eyebrow mb-space-xs">Daily overview</span>
+        <h1 class="sa-page-title"><span id="greeting">Welcome back.</span></h1>
+        <p class="mt-space-xs text-body-lg text-on-surface-variant">Here's where you are on your career journey.</p>
+      </div>
+      <a href="search.html" class="sa-btn-primary self-start md:self-auto"><span class="ms text-[18px]">search</span>Search for jobs</a>
+    </div>
+
+    <!-- Active trajectory -->
+    <section class="sa-card mb-space-xl">
+      <div class="mb-space-lg flex items-center justify-between">
+        <span class="flex items-center gap-2 text-label-sm uppercase tracking-wider text-on-surface-variant">
+          <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>Active trajectory
+        </span>
+        <span class="text-label-md text-on-surface-variant" id="trajectory-stage"></span>
+      </div>
+      <div class="relative px-space-md">
+        <div class="absolute left-[10%] right-[10%] top-[18px] h-px bg-secondary-fixed-dim"></div>
+        <div class="relative grid grid-cols-5" id="trajectory"></div>
+      </div>
+    </section>
+
+    <!-- Stats band -->
+    <section class="mb-space-xl grid grid-cols-4 gap-space-lg rounded-xl bg-surface-container-low px-space-lg py-space-lg" id="stats-grid">
       <div>
-        <h1 class="sa-page-title">
-          <span id="greeting">Welcome back</span> <span class="text-[36px] font-normal text-primary">✦</span>
-        </h1>
-        <p class="sa-page-desc">Here's what's unfolding on your autonomous career journey.</p>
+        <span class="text-headline-lg text-on-surface" id="stat-new">&mdash;</span>
+        <p class="text-body-md text-on-surface-variant">New this week</p>
       </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <a href="settings.html" class="sa-btn"><span class="ms text-[18px]">tune</span>Preferences</a>
-        <a href="search.html" class="sa-btn-primary"><span class="ms text-[18px]">radar</span>✦ Search Opportunities</a>
+      <div>
+        <span class="text-headline-lg text-on-surface" id="stat-apps">&mdash;</span>
+        <p class="text-body-md text-on-surface-variant">Applications</p>
       </div>
-    </div>
+      <div>
+        <span class="flex items-center gap-1 text-headline-lg text-on-surface"><span id="stat-avg-match">&mdash;</span><span class="ms text-[20px] text-tertiary">trending_up</span></span>
+        <p class="text-body-md text-on-surface-variant">Average match</p>
+      </div>
+      <div>
+        <span class="text-headline-lg text-on-surface" id="stat-gaps">&mdash;</span>
+        <p class="text-body-md text-on-surface-variant">Skills to improve</p>
+      </div>
+    </section>
 
-    <!-- Stat grid -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5" id="stats-grid">
-      <div class="flex flex-col justify-between rounded-2xl bg-surface-container-lowest p-5 shadow-sm transition-shadow hover:shadow-md">
-        <div class="flex items-center justify-between text-on-surface-variant">
-          <span class="text-label-md uppercase tracking-wider">Jobs Found</span>
-          <span class="ms text-secondary">explore</span>
-        </div>
-        <div class="my-3 flex items-baseline gap-2">
-          <span class="text-headline-xl font-bold tracking-tight text-on-surface" id="stat-jobs">&mdash;</span>
-          <span class="text-label-sm text-on-surface-variant">deduped</span>
-        </div>
-        <svg class="h-5 w-full text-secondary/40" fill="none" viewBox="0 0 100 24" aria-hidden="true"><path d="M0 18 Q 15 22, 30 12 T 60 14 T 85 4 T 100 8" stroke="currentColor" stroke-linecap="round" stroke-width="2.5"/></svg>
-      </div>
-      <div class="flex flex-col justify-between rounded-2xl bg-surface-container-lowest p-5 shadow-sm transition-shadow hover:shadow-md">
-        <div class="flex items-center justify-between text-on-surface-variant">
-          <span class="text-label-md uppercase tracking-wider">Applications</span>
-          <span class="ms text-primary">timeline</span>
-        </div>
-        <div class="my-3 flex items-baseline gap-2">
-          <span class="text-headline-xl font-bold tracking-tight text-on-surface" id="stat-apps">&mdash;</span>
-          <span class="text-label-sm text-on-surface-variant">in the pipeline</span>
-        </div>
-        <a href="applications.html" class="flex w-fit items-center gap-1.5 rounded-md bg-primary-fixed/40 px-2 py-1 text-primary">
-          <span class="ms text-[14px]">notification_important</span>
-          <span class="text-label-sm font-semibold"><span id="stat-pending">&mdash;</span> need your review</span>
-        </a>
-      </div>
-      <div class="flex flex-col justify-between rounded-2xl bg-surface-container-lowest p-5 shadow-sm transition-shadow hover:shadow-md">
-        <div class="flex items-center justify-between text-on-surface-variant">
-          <span class="text-label-md uppercase tracking-wider">Average Match</span>
-          <span class="ms text-secondary">auto_awesome</span>
-        </div>
-        <div class="my-3 flex items-baseline gap-2">
-          <span class="text-headline-xl font-bold tracking-tight text-on-surface" id="stat-avg-match">&mdash;</span>
-          <span class="text-label-sm font-semibold text-secondary" id="stat-avg-match-sub"></span>
-        </div>
-        <div class="sa-progress"><div class="bg-secondary" id="stat-avg-match-bar" style="width:0%"></div></div>
-      </div>
-      <div class="flex flex-col justify-between rounded-2xl bg-surface-container-lowest p-5 shadow-sm transition-shadow hover:shadow-md">
-        <div class="flex items-center justify-between text-on-surface-variant">
-          <span class="text-label-md uppercase tracking-wider">ATS Readiness</span>
-          <span class="ms text-tertiary">verified_user</span>
-        </div>
-        <div class="my-3 flex items-baseline gap-2">
-          <span class="text-headline-xl font-bold tracking-tight text-on-surface" id="stat-avg-ats">&mdash;</span>
-          <span class="text-label-sm font-semibold text-secondary" id="stat-avg-ats-sub"></span>
-        </div>
-        <div class="sa-progress"><div class="bg-primary" id="stat-avg-ats-bar" style="width:0%"></div></div>
-      </div>
-      <div class="flex flex-col justify-between rounded-2xl bg-surface-container-lowest p-5 shadow-sm transition-shadow hover:shadow-md">
-        <div class="flex items-center justify-between text-on-surface-variant">
-          <span class="text-label-md uppercase tracking-wider">Submitted</span>
-          <span class="ms text-on-surface-variant">send_and_archive</span>
-        </div>
-        <div class="my-3 flex items-baseline gap-2">
-          <span class="text-headline-xl font-bold tracking-tight text-on-surface" id="stat-auto">&mdash;</span>
-          <span class="text-label-sm text-on-surface-variant">auto-submitted</span>
-        </div>
-        <div class="flex items-center justify-between text-label-sm text-on-surface-variant">
-          <span class="font-semibold text-primary"><span id="stat-emails">&mdash;</span> emailed</span>
-          <a href="email.html" class="hover:underline">Email &rarr;</a>
-        </div>
-      </div>
-    </div>
-
-    <!-- The Caravan Route -->
-    <div class="relative overflow-hidden rounded-3xl bg-surface-container-low p-6 shadow-sm md:p-8">
-      <svg class="pointer-events-none absolute -bottom-10 -right-8 h-48 w-96 text-surface-container-highest/60" fill="none" viewBox="0 0 400 150" aria-hidden="true">
-        <path d="M0 120 C100 100, 200 40, 320 80 C360 92, 385 110, 420 140 L420 150 L0 150 Z" fill="currentColor"/>
-      </svg>
-      <div class="relative z-10 mb-10 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+    <!-- Recent applications -->
+    <section class="mb-space-lg">
+      <div class="mb-space-md flex items-end justify-between">
         <div>
-          <div class="flex items-center gap-2">
-            <span class="sa-eyebrow">The Caravan Route</span>
-            <span class="text-headline-sm font-bold text-on-surface" lang="ar">المسار المهني</span>
-          </div>
-          <p class="mt-1 text-body-sm text-on-surface-variant">Every job moves through the same stages, from search to the skills worth learning next.</p>
+          <h2 class="text-headline-sm text-on-surface">Recent Applications</h2>
+          <p class="text-body-sm text-on-surface-variant">The latest roles your search runs found, and where each one stands.</p>
         </div>
-        <div class="inline-flex max-w-xl items-center gap-2 rounded-full bg-surface-container-lowest/90 px-4 py-2 shadow-sm backdrop-blur">
-          <span class="ms text-[18px] text-primary">format_quote</span>
-          <span class="text-label-sm italic text-on-surface-variant">“Big dreams aren't reached in a single stride — the caravan advances step by deliberate step.”</span>
-        </div>
+        <span class="text-label-sm uppercase tracking-widest text-on-surface-variant">Autonomous pipeline</span>
       </div>
-      <div class="relative z-10 py-4" id="caravan">
-        <div class="absolute left-8 right-8 top-[38px] hidden h-1 rounded-full bg-surface-container-highest md:block"></div>
-        <div class="absolute left-8 top-[38px] hidden h-1 rounded-full bg-primary transition-all duration-500 md:block" id="caravan-fill" style="width:0%"></div>
-        <div class="relative grid grid-cols-2 gap-6 md:grid-cols-6 md:gap-4" id="caravan-steps"></div>
+      <div class="sa-list" id="recent-apps">
+        <p class="sa-empty">Loading&hellip;</p>
       </div>
-    </div>
-
-    <!-- Main grid -->
-    <div class="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-
-      <!-- Left: opportunities + review queue -->
-      <div class="flex flex-col space-y-6 lg:col-span-8">
-        <div class="sa-card flex flex-col space-y-6">
-          <div class="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-headline-lg font-bold tracking-tight text-on-surface">Active Opportunities</h2>
-                <span class="rounded-full bg-surface-container px-2 py-0.5 text-label-sm text-on-surface-variant" id="opps-count">&hellip;</span>
-              </div>
-              <p class="mt-0.5 text-body-sm text-on-surface-variant">The most recent roles found by your search runs, ranked by fit.</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <div class="sa-tabs" id="opp-tabs">
-                <button type="button" class="sa-tab is-active" data-filter="all">All</button>
-                <button type="button" class="sa-tab" data-filter="top">Top match</button>
-                <button type="button" class="sa-tab" data-filter="tailored">Tailored</button>
-                <button type="button" class="sa-tab" data-filter="applied">Applied</button>
-              </div>
-              <div class="sa-select-wrap">
-                <select id="opp-sort" class="sa-select !py-2 text-label-md" aria-label="Sort by">
-                  <option value="match_score">Best match</option>
-                  <option value="ats_score">Best ATS</option>
-                  <option value="date_created">Newest</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          <div class="flex flex-col space-y-3" id="applications-body">
-            <p class="sa-empty">Loading&hellip;</p>
-          </div>
-          <div class="flex items-center justify-between pt-2 text-on-surface-variant">
-            <span class="text-label-sm" id="opps-footer"></span>
-            <a class="flex items-center gap-1 text-label-md font-bold text-primary hover:underline" href="applications.html">
-              Explore all applications &rarr;
-            </a>
-          </div>
-        </div>
-
-        <!-- Review queue: real pending_review drafts -->
-        <div class="sa-card-muted flex flex-col space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <span class="ms text-[22px] text-primary">smart_toy</span>
-              <h3 class="sa-card-title">Awaiting Your Review</h3>
-            </div>
-            <span class="sa-chip-teal" id="review-mode-chip">Human-in-the-loop</span>
-          </div>
-          <p class="text-body-sm text-on-surface-variant" id="review-queue-desc">
-            Drafts the agent prepared but didn't submit on its own. Nothing here is sent until you do it.
-          </p>
-          <div class="grid grid-cols-1 gap-4 pt-1 md:grid-cols-2" id="review-queue">
-            <p class="sa-empty md:col-span-2">Loading&hellip;</p>
-          </div>
-        </div>
+      <div class="mt-space-md flex justify-end">
+        <a href="applications.html" class="flex items-center gap-1 text-label-md text-on-surface-variant hover:text-primary">View all applications <span class="ms text-[18px]">arrow_forward</span></a>
       </div>
+    </section>
 
-      <!-- Right column -->
-      <div class="flex flex-col space-y-6 lg:col-span-4">
-        <div class="sa-card flex flex-col space-y-5">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary-container text-on-secondary-container">
-                <span class="ms text-[18px]">trending_up</span>
-              </div>
-              <h3 class="sa-card-title">Targeted Skill Boost</h3>
-            </div>
-            <span class="rounded-full bg-secondary-container/60 px-2 py-0.5 text-label-sm font-bold text-secondary" id="gaps-chip"></span>
-          </div>
-          <p class="text-body-sm text-on-surface-variant">The skills most often missing from the jobs you matched. Closing these unlocks the most roles.</p>
-          <div class="flex flex-col space-y-4" id="skill-boost">
-            <p class="sa-empty">Loading&hellip;</p>
-          </div>
-          <a href="reports.html" class="sa-btn-secondary w-full rounded-xl">
-            <span class="ms text-[18px]">lightbulb</span>What should I learn next?
-          </a>
-        </div>
-
-        <div class="sa-card flex flex-col space-y-4">
-          <div class="flex items-center gap-2">
-            <span class="ms text-tertiary">insights</span>
-            <h3 class="sa-card-title">Agent Setup</h3>
-          </div>
-          <div class="space-y-3">
-            <div class="flex items-center justify-between rounded-xl bg-surface-container-low p-3">
-              <div class="flex items-center gap-2.5">
-                <span class="ms text-primary">memory</span>
-                <div>
-                  <span class="block text-label-md font-bold text-on-surface">LLM provider</span>
-                  <span class="text-label-sm text-on-surface-variant">Scoring &amp; tailoring</span>
-                </div>
-              </div>
-              <span class="text-label-md font-bold text-secondary" id="llm-value">&mdash;</span>
-            </div>
-            <div class="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3">
-              <div class="flex items-center gap-2.5">
-                <span class="ms text-tertiary">verified</span>
-                <div>
-                  <span class="block text-label-md font-bold text-on-surface">Whitelisted sources</span>
-                  <span class="text-label-sm text-on-surface-variant">Allowed to auto-submit</span>
-                </div>
-              </div>
-              <span class="text-right text-label-md font-bold text-tertiary" id="whitelist-value">&mdash;</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="sa-card flex flex-col space-y-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="ms text-secondary">bolt</span>
-              <h3 class="sa-card-title">Agent Activity Log</h3>
-            </div>
-            <span class="h-2 w-2 animate-ping rounded-full bg-secondary"></span>
-          </div>
-          <div class="space-y-3" id="activity-log">
-            <p class="sa-empty">Loading&hellip;</p>
-          </div>
-          <a href="reports.html" class="w-full py-2 text-center text-label-sm font-bold text-primary hover:underline">View report history &rarr;</a>
-        </div>
-      </div>
+    <!-- Insight -->
+    <div class="hidden items-center justify-between gap-space-md rounded-xl bg-surface-container-low px-space-lg py-space-md" id="insight">
+      <p class="flex items-center gap-2 text-body-md text-on-surface-variant">
+        <span class="ms text-[20px] text-tertiary">lightbulb</span>
+        <span><span class="text-tertiary">Sa'ei noticed:</span> <span class="text-on-surface" id="insight-text"></span></span>
+      </p>
+      <a href="reports.html" class="flex items-center gap-1 whitespace-nowrap text-label-md text-primary hover:underline">See skill gaps <span class="ms text-[18px]">arrow_forward</span></a>
     </div>
   </div>
 </main>
 
-<div class="modal-overlay" id="why-modal" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="why-modal-title">
-    <div class="modal-header">
-      <div class="modal-header-main">
-        <span class="modal-score-value" id="why-score-value">&mdash;</span>
-        <span class="rating-badge" id="why-rating-badge"></span>
-        <span class="modal-score-label" id="why-modal-title">ATS score breakdown</span>
-      </div>
-      <button type="button" class="modal-close" id="why-modal-close" aria-label="Close">&times;</button>
-    </div>
-    <div class="modal-tabs">
-      <button type="button" class="modal-tab active" data-tab="original">Original CV</button>
-      <button type="button" class="modal-tab" data-tab="tailored">Tailored CV</button>
-    </div>
-    <div class="modal-body">
-      <div class="modal-split">
-        <div id="why-doc-pane"></div>
-        <div>
-          <div class="score-pillars" id="why-pillars"></div>
-          <div class="keyword-section">
-            <div class="keyword-section-title">Matched keywords</div>
-            <div class="keyword-chips" id="why-matched-chips"></div>
-          </div>
-          <div class="keyword-section">
-            <div class="keyword-section-title">Missing keywords</div>
-            <div class="keyword-chips" id="why-missing-chips"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <script src="shell.js"></script>
 <script src="config.js"></script>
-<script src="why-modal.js"></script>
 <script src="ui.js"></script>
 <script src="app.js"></script>
 </body>

@@ -10,166 +10,133 @@
 </head>
 <body data-page="search">
 <main id="page">
-  <div class="flex flex-col space-y-8">
-
-    <div class="flex flex-col justify-between gap-6 xl:flex-row xl:items-end">
+  <div class="flex flex-col">
+    <div class="mb-space-lg flex items-end justify-between gap-space-lg">
       <div>
-        <span class="sa-chip-teal mb-3"><span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>Scheduler runs daily at 8am</span>
-        <h1 class="sa-page-title">Autonomous Search &amp; Market Radar</h1>
-        <p class="sa-page-desc">Configure what the crawlers look for and where. The scheduled run and the button here both use whatever is saved on this page.</p>
+        <h1 class="sa-page-title">Search Opportunities</h1>
+        <p class="sa-page-desc">Scan your job boards for roles that fit, matched against your profile before anything reaches you.</p>
       </div>
-      <div class="flex items-center gap-5">
-        <div class="text-right">
-          <span class="block text-label-sm text-on-surface-variant">Active coverage</span>
-          <span class="text-headline-sm font-bold text-on-surface"><span id="coverage-count">&mdash;</span> sites configured</span>
-        </div>
-        <button type="button" id="search-btn" class="sa-btn-primary px-6 py-3"><span class="ms text-[18px]">bolt</span>Launch Instant Discovery</button>
-      </div>
+      <span class="flex items-center gap-2 whitespace-nowrap rounded-lg bg-surface-container-low px-space-md py-space-sm text-label-md text-on-surface">
+        <span class="ms text-[18px] text-on-surface-variant">tune</span>Target cadence: <span class="text-primary">Daily, 8:00</span>
+      </span>
     </div>
 
-    <div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
-
-      <!-- Left: target model + pipelines -->
-      <div class="flex flex-col space-y-6 xl:col-span-5">
-        <section class="sa-card">
-          <div class="mb-5 flex items-start justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <span class="ms text-primary">manage_search</span>
-              <h2 class="text-headline-md font-bold text-on-surface">Autonomous Target Model</h2>
-            </div>
-            <span class="sa-chip">Position &amp; filters</span>
-          </div>
-          <form id="position-form" class="flex flex-col gap-5">
-            <div>
-              <label for="position-input" class="sa-label">Target role profile</label>
-              <input type="text" id="position-input" class="sa-input text-body-md font-semibold" placeholder="e.g. Backend Engineer — blank searches everything">
-              <span class="sa-hint">Matches titles containing every word, in any order — "AI Engineer" also matches "Gen AI Engineer".</span>
-            </div>
-            <div>
-              <span class="sa-label">Seniority tier</span>
-              <div class="flex flex-wrap gap-2" id="seniority-pills"></div>
-              <select id="seniority-input" class="hidden" aria-hidden="true" tabindex="-1">
-                <option value="">Any</option>
-              </select>
-            </div>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label for="max-age-input" class="sa-label">Discovery freshness</label>
-                <div class="sa-select-wrap">
-                  <select id="max-age-input" class="sa-select">
-                    <option value="">Any time</option>
-                    <option value="1">Posted within 24 hours</option>
-                    <option value="3">Posted within 3 days</option>
-                    <option value="7">Posted within a week</option>
-                    <option value="14">Posted within 2 weeks</option>
-                    <option value="30">Posted within a month</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label for="max-results-input" class="sa-label">Max results per site</label>
-                <div class="sa-select-wrap">
-                  <select id="max-results-input" class="sa-select">
-                    <option value="">No limit</option>
-                    <option value="10">10</option>
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <details class="group rounded-xl bg-surface-container-low px-4 py-3 text-body-sm text-on-surface-variant">
-              <summary class="flex cursor-pointer list-none items-center gap-2 text-label-md font-semibold text-on-surface">
-                <span class="ms text-[18px] text-primary">info</span>How these filters are applied
-                <span class="ms ml-auto text-[18px] transition-transform group-open:rotate-180">expand_more</span>
-              </summary>
-              <p class="mt-2">Position/seniority are the search query for Google Jobs (needs <code>SERPAPI_KEY</code>) and a title filter on every Greenhouse/Lever/watchlist/site result; seniority is keyword-matched ("senior", "staff", "junior"), so both are heuristics, not exact.</p>
-              <p class="mt-2">Freshness only applies where a real posted date exists (Greenhouse, Lever, Google Jobs) — sites read by the best-effort scraper have no reliable date and are never excluded by it. Max results caps raw results pulled from each board before filtering. Saved to <code>.env</code>.</p>
-            </details>
-            <div class="flex items-center gap-3">
-              <button type="submit" class="sa-btn-primary"><span class="ms text-[18px]">save</span>Save filters</button>
-              <span id="position-message" class="save-message"></span>
-            </div>
-          </form>
-        </section>
-
-        <section class="sa-card">
-          <div class="mb-5 flex items-start justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <span class="ms text-secondary">hub</span>
-              <h2 class="text-headline-md font-bold text-on-surface">Active Ingestion Pipelines</h2>
-            </div>
-            <span class="text-label-sm font-semibold text-secondary" id="sites-count"></span>
-          </div>
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2" id="sites-body">
-            <p class="sa-empty sm:col-span-2">Loading&hellip;</p>
-          </div>
-          <form id="add-site-form" class="mt-3 flex flex-col gap-2 rounded-2xl border-2 border-dashed border-outline-variant/70 p-3 sm:flex-row">
-            <label for="site-url-input" class="sr-only">Website URL</label>
-            <input type="text" id="site-url-input" class="sa-input flex-1 bg-surface-container-lowest" placeholder="https://boards.greenhouse.io/acme or any careers page">
-            <button type="submit" class="sa-btn whitespace-nowrap"><span class="ms text-[18px]">add_link</span>Add career URL</button>
-          </form>
-          <span id="site-message" class="save-message mt-2 block"></span>
-          <details class="group mt-4 rounded-xl bg-secondary-container/40 px-4 py-3 text-body-sm text-on-secondary-fixed-variant">
-            <summary class="flex cursor-pointer list-none items-center gap-2 text-label-md font-semibold">
-              <span class="ms text-[18px]">shield</span>Which sites work, and how they're searched
-              <span class="ms ml-auto text-[18px] transition-transform group-open:rotate-180">expand_more</span>
-            </summary>
-            <p class="mt-2">Wuzzuf and Bayt.com are pre-added (both return real results to a plain, unauthenticated request) — remove either if you don't want it. LinkedIn and Indeed block that outright, so they're not included and won't work if added. For those boards the query is rebuilt from Position each run, so they're skipped when Position is blank.</p>
-            <p class="mt-2">Greenhouse/Lever URLs are detected automatically and searched via their public APIs. Any other URL uses a best-effort scraper that follows job-looking same-site links, so results can be noisier. Respect each site's Terms of Service before adding it.</p>
-          </details>
-        </section>
-      </div>
-
-      <!-- Right: run status + discoveries -->
-      <div class="flex flex-col space-y-6 xl:col-span-7">
-        <section class="sa-card">
-          <div class="mb-5 flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <span class="ms text-primary">explore</span>
-              <h2 class="text-headline-md font-bold text-on-surface">Crawler Exploration Status</h2>
-            </div>
-            <span class="sa-chip" id="run-state-chip">Idle</span>
-          </div>
-          <div class="rounded-2xl bg-surface-container-low p-5">
-            <div class="relative">
-              <div class="absolute left-[10%] right-[10%] top-4 h-1 rounded-full bg-surface-container-highest"></div>
-              <div class="relative grid grid-cols-5 gap-2" id="run-steps"></div>
-            </div>
-            <p id="search-message" class="save-message mt-5 block rounded-xl bg-surface-container-lowest px-4 py-3 font-mono text-label-md">
-              Ready. Runs the same pipeline as the 8am scheduler, on demand.
-            </p>
-          </div>
-        </section>
-
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="text-label-md uppercase tracking-wider text-on-surface-variant">Triage:</span>
-            <div class="sa-tabs" id="triage-tabs">
-              <button type="button" class="sa-tab is-active" data-filter="all">All discoveries</button>
-              <button type="button" class="sa-tab" data-filter="high">High match (≥75%)</button>
-              <button type="button" class="sa-tab" data-filter="tailored">Tailored</button>
-            </div>
-          </div>
-          <div class="sa-select-wrap">
-            <select id="discovery-sort" class="sa-select !py-2 text-label-md" aria-label="Sort">
-              <option value="date_created">Newest first</option>
-              <option value="match_score">Match index</option>
-              <option value="ats_score">ATS score</option>
+    <!-- Search card -->
+    <section class="sa-card mb-space-xl">
+      <form id="position-form">
+        <label for="position-input" class="mb-space-sm block text-label-sm uppercase tracking-wider text-on-surface-variant">What kind of role are you looking for?</label>
+        <div class="flex items-stretch gap-space-sm">
+          <label class="relative flex-1">
+            <span class="ms pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+            <input type="text" id="position-input" class="sa-input h-full py-3 pl-10 text-headline-sm font-medium" placeholder="e.g. AI Engineer — blank searches everything">
+          </label>
+          <div class="sa-select-wrap w-44">
+            <span class="pointer-events-none absolute left-3.5 top-2 text-label-sm normal-case tracking-normal text-on-surface-variant">Experience</span>
+            <select id="seniority-input" class="sa-select h-full pb-2 pt-6 text-label-md">
+              <option value="">Any level</option>
             </select>
           </div>
+          <div class="sa-select-wrap w-44">
+            <span class="pointer-events-none absolute left-3.5 top-2 text-label-sm normal-case tracking-normal text-on-surface-variant">Posted within</span>
+            <select id="max-age-input" class="sa-select h-full pb-2 pt-6 text-label-md">
+              <option value="">Any time</option>
+              <option value="1">24 hours</option>
+              <option value="3">3 days</option>
+              <option value="7">A week</option>
+              <option value="14">2 weeks</option>
+              <option value="30">A month</option>
+            </select>
+          </div>
+          <button type="submit" id="search-btn" class="sa-btn-primary px-6"><span class="ms text-[18px]">explore</span>Search</button>
         </div>
 
-        <div class="flex flex-col space-y-4" id="discoveries">
-          <p class="sa-empty">Loading&hellip;</p>
+        <div class="mt-space-md flex items-center justify-between gap-space-md rounded-lg bg-surface-container-low px-space-md py-space-sm">
+          <span class="flex min-w-0 items-center gap-2 text-body-sm text-on-surface-variant">
+            <span class="ms text-[18px]">hub</span>
+            <span class="truncate"><span class="text-on-surface">Sources:</span> <span id="sources-summary">&hellip;</span></span>
+          </span>
+          <button type="button" class="flex items-center gap-1 whitespace-nowrap text-label-md text-primary hover:underline" id="manage-sources">Manage sources <span class="ms text-[16px]">arrow_forward</span></button>
         </div>
-        <div class="flex items-center justify-between rounded-2xl bg-surface-container-lowest px-5 py-4 shadow-sm">
-          <span class="text-body-sm text-on-surface-variant" id="discoveries-footer"></span>
-          <button type="button" class="sa-btn-ghost" id="discoveries-more">Load more &rarr;</button>
+
+        <details class="group mt-space-sm">
+          <summary class="flex cursor-pointer list-none items-center gap-2 px-1 text-label-md text-on-surface-variant">
+            <span class="ms text-[18px]">filter_list</span>Advanced filters (results per site)
+            <span class="ms text-[18px] transition-transform group-open:rotate-180">expand_more</span>
+          </summary>
+          <div class="mt-space-sm grid grid-cols-3 gap-space-md px-1">
+            <div>
+              <label for="max-results-input" class="sa-label">Max results per site</label>
+              <div class="sa-select-wrap">
+                <select id="max-results-input" class="sa-select">
+                  <option value="">No limit</option>
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </div>
+            </div>
+            <p class="col-span-2 self-end text-body-sm text-on-surface-variant">Titles match when they contain every word you typed, in any order. Freshness only applies where a board publishes a real posted date. Filters are saved to <code>.env</code>, and the 8:00 run uses them too.</p>
+          </div>
+        </details>
+        <span id="position-message" class="save-message mt-space-sm block"></span>
+      </form>
+
+      <!-- Source management (from the old Job Boards panel) -->
+      <div class="mt-space-md border-t border-surface-container pt-space-md" id="sources-panel" hidden>
+        <div class="mb-space-sm flex items-center justify-between">
+          <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Job boards &amp; career pages</span>
+          <span class="text-body-sm text-on-surface-variant">Greenhouse/Lever links use their public APIs; anything else is scraped best-effort.</span>
         </div>
+        <div class="grid grid-cols-3 gap-space-sm" id="sites-body"></div>
+        <form id="add-site-form" class="mt-space-sm flex gap-space-sm">
+          <label for="site-url-input" class="sr-only">Website URL</label>
+          <input type="text" id="site-url-input" class="sa-input flex-1" placeholder="https://boards.greenhouse.io/acme or any careers page">
+          <button type="submit" class="sa-btn"><span class="ms text-[18px]">add_link</span>Add source</button>
+        </form>
+        <span id="site-message" class="save-message mt-2 block"></span>
       </div>
-    </div>
+    </section>
+
+    <!-- Run progress -->
+    <section class="relative mb-space-xl overflow-hidden rounded-xl bg-surface-container-low p-space-lg" id="run-panel" hidden>
+      <div class="pointer-events-none absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-secondary-container/40 to-transparent"></div>
+      <div class="relative">
+        <div class="mb-space-lg flex items-start justify-between gap-space-md">
+          <div class="flex items-start gap-space-sm">
+            <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-fixed/60 text-primary"><span class="ms">travel_explore</span></span>
+            <div>
+              <h2 class="text-headline-sm text-on-surface" id="run-title">Sa'ei is searching across your active sources&hellip;</h2>
+              <p class="text-body-sm text-on-surface-variant">Each new job is matched against your profile before it reaches you.</p>
+            </div>
+          </div>
+          <span class="flex items-center gap-1.5 rounded-full bg-surface-container-lowest px-3 py-1 text-label-sm normal-case tracking-normal text-on-surface-variant" id="run-chip">
+            <span class="h-1.5 w-1.5 rounded-full bg-tertiary"></span>Running
+          </span>
+        </div>
+        <div class="mb-space-lg h-1.5 overflow-hidden rounded-full bg-surface-container-highest">
+          <div class="h-full rounded-full bg-gradient-to-r from-tertiary-fixed-dim to-primary transition-all duration-700" id="run-bar" style="width: 0%"></div>
+        </div>
+        <div class="grid grid-cols-3 gap-space-sm" id="run-steps"></div>
+        <p class="mt-space-md flex items-start gap-2 text-body-sm text-on-surface-variant" id="search-message">
+          <span class="ms text-[16px]">info</span><span>Takes a few minutes — one model call per new job found.</span>
+        </p>
+      </div>
+    </section>
+
+    <!-- Snapshots -->
+    <section class="max-w-3xl">
+      <div class="mb-space-md flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <h2 class="text-headline-sm text-on-surface">Recent High-Signal Snapshots</h2>
+          <span class="rounded-full bg-secondary-container px-2 py-0.5 text-label-sm normal-case tracking-normal text-on-secondary-fixed-variant" id="snap-chip"></span>
+        </div>
+        <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">Best matches from recent runs</span>
+      </div>
+      <div class="flex flex-col gap-space-sm" id="snapshots">
+        <p class="sa-empty">Loading&hellip;</p>
+      </div>
+    </section>
   </div>
 </main>
 

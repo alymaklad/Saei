@@ -20,8 +20,8 @@
   --accent-hover: #bc5633;       /* primary-container */
   --accent-soft: rgba(156, 62, 30, 0.10);
   --accent-soft-border: rgba(156, 62, 30, 0.22);
-  --ok: #0a6a64;                 /* secondary (teal) */
-  --ok-soft: #a2f1e8;            /* secondary-container */
+  --ok: #6a5d43;                 /* secondary (warm brown) */
+  --ok-soft: #f1ddbd;            /* secondary-container */
   --warn: #805200;               /* tertiary */
   --warn-soft: #ffddb4;          /* tertiary-fixed */
   --danger: #ba1a1a;             /* error */
