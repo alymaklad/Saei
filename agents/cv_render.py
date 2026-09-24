@@ -36,42 +36,54 @@ import re
 from io import BytesIO
 from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_quoteattr
 
-# Accent color sampled directly from the uploaded CV (cv/current_cv.pdf) --
-# its section-divider rules and header text use this exact navy, extracted
-# via pdfplumber (non_stroking_color (0.122, 0.227, 0.373) -> this hex).
-# Reportlab can't match the original's Calibri/Times mix without embedding
-# font files (Calibri isn't freely redistributable), so this uses Helvetica
-# throughout -- a clean, portable sans-serif -- rather than the original's
-# specific fonts.
-CV_ACCENT_COLOR = "#555555"
-CV_MUTED_COLOR = "#555555"
-LINKS_COLOR = "#0462C0"  # Google's blue for links, for consistency with the web
-# Densities tried, in order, before any content is cut -- LARGEST first, so a
-# CV that would otherwise end an inch above the bottom margin is set bigger
-# rather than left floating in white space. The floor is the last one: 9.5pt
-# body text scaled to ~8.7pt, which still prints cleanly and is what most
-# one-page CVs are set in anyway.
-FIT_DENSITIES = (1.12, 1.08, 1.04, 1.0, 0.95, 0.91)
+# ---- the reference format ----------------------------------------------------
+#
+# Every number below was measured with pdfplumber off the user's reference CV
+# ("Aly_AI_&_Automation Engineer.pdf", a Word export) rather than guessed, so a
+# tailored CV comes out in the same format as the one they maintain by hand:
+#
+#   * A4, 0.3in (21.6pt) side margins; section rules run 20.2 -> 575.3.
+#   * Calibri throughout: name 26pt regular, headline 14pt bold, everything
+#     else ~10pt (9.96) on a 12.2pt line pitch; dates/locations 9pt
+#     bold-italic, right-aligned on the entry's own line.
+#   * Section headers are black bold caps over a 0.72pt navy rule.
+#   * LinkedIn / GitHub print as the words "Linkedin" / "Github", blue and
+#     underlined, linking to the stored URL.
+#
+# Calibri is not redistributable, so it is not bundled: it is picked up from
+# the system (Windows ships it), then Carlito -- the metric-compatible open
+# clone (Debian/Ubuntu: fonts-crosextra-carlito) -- and only then Helvetica.
+CV_ACCENT_COLOR = "#1F3864"   # section rules: (0.122, 0.22, 0.392)
+CV_TEXT_COLOR = "#000000"
+CV_MUTED_COLOR = "#000000"    # the reference prints dates in black, not grey
+LINKS_COLOR = "#0070C0"       # (0.0, 0.439, 0.753), Word's "Blue, Accent 1"
 
-# Whatever vertical slack is left after the density is chosen gets spread
-# between the sections rather than pooling at the bottom of the page. Capped,
-# because a sparse CV stretched to the margins reads as padding.
-MAX_SECTION_GAP = 16.0
+BODY_SIZE = 9.96
+LINE_PITCH = 12.2
+META_SIZE = 9.0
+NAME_SIZE = 26.04
+HEADLINE_SIZE = 14.04
 
-# Page geometry, measured off the user's own CV (cv/current_cv.pdf) with
-# pdfplumber rather than guessed: every line of text on it -- section headers,
-# body, entry titles, skills rows -- starts at x=31.0, its divider rules run
-# 29.5 to 582.5, and its content runs from y=17.5 to y=777.7. Those are narrow
-# margins by word-processor standards and they are most of why that CV fits on
-# one page; matching them is what lets a tailored CV hold the same amount.
-PAGE_MARGIN_X = 31.0
-PAGE_MARGIN_TOP = 18.0
-PAGE_MARGIN_BOTTOM = 18.0
+# Densities tried, in order, before any content is cut. 1.0 IS the reference
+# format; the smaller ones only exist so an unusually long CV can still fit
+# one page before a bullet has to go.
+FIT_DENSITIES = (1.0, 0.97, 0.94, 0.91)
 
-# Bullets, same source: the glyph sits 4.5pt in from the margin and its text
-# 15.9pt, so a wrapped line aligns under the text rather than under the dot.
+# The reference doesn't stretch its sections to fill the page, so neither does
+# this: leftover space stays at the bottom, exactly where Word leaves it.
+MAX_SECTION_GAP = 0.0
+
+PAGE_MARGIN_X = 21.6
+PAGE_MARGIN_TOP = 13.1
+PAGE_MARGIN_BOTTOM = 21.6
+
+# Rules overhang the text column by 1.4pt a side (20.2 vs 21.6).
+RULE_OVERHANG = 1.4
+
+# Bullets: the glyph sits 4.6pt in from the margin and its text 16pt, so a
+# wrapped line aligns under the text rather than under the dot.
 BULLET_TEXT_INDENT = 16.0
-BULLET_GLYPH_INDENT = 4.5
+BULLET_GLYPH_INDENT = 4.6
 
 # reportlab's base14 Helvetica only supports WinAnsiEncoding. LLMs routinely
 # write "typographically correct" Unicode punctuation instead of plain ASCII
@@ -100,8 +112,92 @@ _PDF_UNSAFE_PUNCTUATION_RE = re.compile(
 
 
 def _sanitize_for_pdf_font(text: str) -> str:
+    # Only the Helvetica fallback needs this: Calibri/Carlito are real TTFs
+    # with the whole punctuation set, and the reference itself prints curly
+    # apostrophes and en dashes.
+    if _fonts()["ttf"]:
+        return text or ""
     return _PDF_UNSAFE_PUNCTUATION_RE.sub(
         lambda m: _PDF_UNSAFE_PUNCTUATION[m.group(0)], text or "")
+
+
+# ---- fonts -------------------------------------------------------------------
+
+_FONT_CANDIDATES = (
+    ("Calibri", ("calibri.ttf", "calibrib.ttf", "calibrii.ttf", "calibriz.ttf")),
+    ("Carlito", ("Carlito-Regular.ttf", "Carlito-Bold.ttf",
+                 "Carlito-Italic.ttf", "Carlito-BoldItalic.ttf")),
+)
+
+
+def _font_dirs() -> list[str]:
+    dirs = [os.environ.get("CV_FONT_DIR", ""),
+            os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
+            os.path.expanduser("~/.fonts"), os.path.expanduser("~/.local/share/fonts"),
+            "/Library/Fonts", os.path.expanduser("~/Library/Fonts")]
+    for root in ("/usr/share/fonts", "/usr/local/share/fonts"):
+        if os.path.isdir(root):
+            dirs.extend(dirpath for dirpath, _, _ in os.walk(root))
+    return [d for d in dirs if d and os.path.isdir(d)]
+
+
+def _find_font_files(names) -> list[str] | None:
+    """All four faces of one family, or None if any is missing -- a family with
+    no bold face would render every <b> span as regular text."""
+    dirs = _font_dirs()
+    found = []
+    for name in names:
+        for directory in dirs:
+            # Case-insensitive: Windows ships "calibri.ttf", other copies "Calibri.ttf".
+            match = next((os.path.join(directory, f) for f in os.listdir(directory)
+                          if f.lower() == name.lower()), None)
+            if match:
+                found.append(match)
+                break
+        else:
+            return None
+    return found
+
+
+_FONT_CACHE: dict | None = None
+
+
+def _fonts() -> dict:
+    """Registered font names: regular / bold / italic / bold_italic, plus
+    whether they are real TTFs ("ttf").
+
+    Registered once per process, and as a family, so <b> and <i> inside a
+    paragraph resolve to the real bold/italic faces.
+    """
+    global _FONT_CACHE
+    if _FONT_CACHE is not None:
+        return _FONT_CACHE
+    from reportlab.lib.fonts import addMapping
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    for family, files in _FONT_CANDIDATES:
+        paths = _find_font_files(files)
+        if not paths:
+            continue
+        names = [f"CV{family}", f"CV{family}-Bold", f"CV{family}-Italic",
+                 f"CV{family}-BoldItalic"]
+        try:
+            for name, path in zip(names, paths):
+                pdfmetrics.registerFont(TTFont(name, path))
+        except Exception:  # noqa: BLE001 -- a broken font file falls through to the next family
+            continue
+        for bold, italic, name in ((0, 0, names[0]), (1, 0, names[1]),
+                                   (0, 1, names[2]), (1, 1, names[3])):
+            addMapping(names[0], bold, italic, name)
+        _FONT_CACHE = {"regular": names[0], "bold": names[1], "italic": names[2],
+                       "bold_italic": names[3], "ttf": True}
+        return _FONT_CACHE
+
+    _FONT_CACHE = {"regular": "Helvetica", "bold": "Helvetica-Bold",
+                   "italic": "Helvetica-Oblique", "bold_italic": "Helvetica-BoldOblique",
+                   "ttf": False}
+    return _FONT_CACHE
 
 
 # ---- dates -------------------------------------------------------------------
@@ -354,8 +450,8 @@ _FRAME_PADDING = 12
 
 
 def _doc_width():
-    from reportlab.lib.pagesizes import LETTER
-    return LETTER[0] - 2 * PAGE_MARGIN_X
+    from reportlab.lib.pagesizes import A4
+    return A4[0] - 2 * PAGE_MARGIN_X
 
 
 def _new_doc(target):
@@ -365,11 +461,11 @@ def _new_doc(target):
     own 6pt of padding inside them. Subtracting half of _FRAME_PADDING is what
     makes the measured geometry above come out right on the page.
     """
-    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.pagesizes import A4
     from reportlab.platypus import SimpleDocTemplate
     inset = _FRAME_PADDING / 2
     return SimpleDocTemplate(
-        target, pagesize=LETTER,
+        target, pagesize=A4,
         leftMargin=PAGE_MARGIN_X - inset, rightMargin=PAGE_MARGIN_X - inset,
         topMargin=PAGE_MARGIN_TOP - inset, bottomMargin=PAGE_MARGIN_BOTTOM - inset,
         title="Curriculum Vitae", author="",
@@ -402,65 +498,89 @@ def _empty_paragraph():
 def _styles(scale: float = 1.0, section_gap: float = 0.0):
     """The stylesheet at a given density.
 
-    `scale` tightens type and spacing together so the page can be squeezed
-    before any content is cut -- which is the order a person does it in, and
-    the difference between a CV that keeps its third project and one that
-    doesn't. Only three densities are ever used (see FIT_DENSITIES); the
-    tightest is still comfortably readable at print size.
+    scale=1.0 is the reference format. Smaller values tighten type and spacing
+    together so a long CV can be squeezed before any content is cut -- which
+    is the order a person does it in (see FIT_DENSITIES).
     """
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.colors import HexColor
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
-    accent = HexColor(CV_ACCENT_COLOR)
-    muted = HexColor(CV_MUTED_COLOR)
+    fonts = _fonts()
+    text = HexColor(CV_TEXT_COLOR)
     base = getSampleStyleSheet()["Normal"]
 
     def s(value):
         return round(value * scale, 2)
 
     # NOTE: ParagraphStyle inherits `leading` (line height) from its parent
-    # unless set explicitly -- base has fontSize=10/leading=12, so any style
-    # bumping fontSize well past that (e.g. the 19pt headline) MUST set its
-    # own leading too, or the next paragraph starts before the glyphs' actual
-    # height clears and visibly overlaps it.
+    # unless set explicitly, so every style here sets its own -- a 26pt name
+    # on the parent's 12pt leading would overlap the line under it.
     return {
-        "headline": ParagraphStyle(
-            "CVHeadline", parent=base, fontName="Helvetica-Bold", fontSize=s(19),
-            leading=s(22), textColor=accent, alignment=TA_CENTER, spaceAfter=1),
+        # The reference puts the name first and large, the headline under it.
         "name": ParagraphStyle(
-            "CVName", parent=base, fontName="Helvetica-Bold", fontSize=s(13),
-            leading=s(16), alignment=TA_CENTER, spaceAfter=s(3)),
+            "CVName", parent=base, fontName=fonts["regular"], fontSize=s(NAME_SIZE),
+            leading=s(32.4), textColor=text, alignment=TA_CENTER),
+        "headline": ParagraphStyle(
+            "CVHeadline", parent=base, fontName=fonts["bold"], fontSize=s(HEADLINE_SIZE),
+            leading=s(22.2), textColor=text, alignment=TA_CENTER),
         "contact": ParagraphStyle(
-            "CVContact", parent=base, fontName="Helvetica", fontSize=s(8.8),
-            leading=s(11.5), textColor=muted, alignment=TA_CENTER, spaceAfter=s(9)),
+            "CVContact", parent=base, fontName=fonts["regular"], fontSize=s(BODY_SIZE),
+            leading=s(LINE_PITCH), textColor=text, alignment=TA_CENTER,
+            spaceAfter=s(12.0)),
         "header": ParagraphStyle(
-            "CVHeader", parent=base, fontName="Helvetica-Bold", fontSize=s(10.5),
-            leading=s(13), textColor=accent, spaceBefore=s(8) + section_gap,
-            spaceAfter=1),
+            "CVHeader", parent=base, fontName=fonts["bold"], fontSize=s(BODY_SIZE),
+            leading=s(LINE_PITCH), textColor=text, spaceBefore=s(6.0) + section_gap,
+            spaceAfter=0),
         "body": ParagraphStyle(
-            "CVBody", parent=base, fontName="Helvetica", fontSize=s(9.5),
-            leading=s(12.2), spaceAfter=s(2)),
+            "CVBody", parent=base, fontName=fonts["regular"], fontSize=s(BODY_SIZE),
+            leading=s(LINE_PITCH), textColor=text, embeddedHyphenation=1),
+        "skills": ParagraphStyle(
+            "CVSkills", parent=base, fontName=fonts["regular"], fontSize=s(BODY_SIZE),
+            leading=s(LINE_PITCH), textColor=text),
         "entry": ParagraphStyle(
-            "CVEntry", parent=base, fontName="Helvetica", fontSize=s(9.5),
-            leading=s(12.2)),
+            "CVEntry", parent=base, fontName=fonts["regular"], fontSize=s(BODY_SIZE),
+            leading=s(LINE_PITCH), textColor=text),
         "meta": ParagraphStyle(
-            "CVMeta", parent=base, fontName="Helvetica-BoldOblique", fontSize=s(8.8),
-            leading=s(12.2), textColor=muted, alignment=TA_RIGHT),
-        # Hanging indent, at the same offsets the user's own CV uses: wrapped
-        # lines align under the text, not under the dot.
+            # Leading shortened by the size difference so, bottom-aligned in the
+            # entry row, the 9pt dates land on the 10pt title's baseline.
+            "CVMeta", parent=base, fontName=fonts["bold_italic"], fontSize=s(META_SIZE),
+            leading=s(LINE_PITCH - (BODY_SIZE - META_SIZE)),
+            textColor=HexColor(CV_MUTED_COLOR), alignment=TA_RIGHT),
+        # Hanging indent via bulletText: the glyph at BULLET_GLYPH_INDENT, the
+        # text -- and every wrapped line -- at BULLET_TEXT_INDENT.
         "bullet": ParagraphStyle(
-            "CVBullet", parent=base, fontName="Helvetica", fontSize=s(9.5),
-            leading=s(12.2), leftIndent=BULLET_TEXT_INDENT,
-            firstLineIndent=BULLET_GLYPH_INDENT - BULLET_TEXT_INDENT,
-            spaceAfter=s(1.5)),
-        # "note": ParagraphStyle(
-        #     "CVNote", parent=base, fontName="Helvetica-Oblique", fontSize=s(8.5),
-        #     leading=s(11), textColor=muted, spaceBefore=s(2)),
+            "CVBullet", parent=base, fontName=fonts["regular"], fontSize=s(BODY_SIZE),
+            leading=s(LINE_PITCH), textColor=text, leftIndent=BULLET_TEXT_INDENT,
+            bulletIndent=BULLET_GLYPH_INDENT, bulletFontName=fonts["regular"],
+            bulletFontSize=s(BODY_SIZE), spaceAfter=s(3.1), embeddedHyphenation=1),
+        "note": ParagraphStyle(
+            "CVNote", parent=base, fontName=fonts["italic"], fontSize=s(META_SIZE),
+            leading=s(11), textColor=text, spaceBefore=s(2)),
     }
 
 
-def _entry_row(left_html: str, right_html: str, styles, width):
+def _rule(space_after: float = 8.4):
+    """The navy section rule, overhanging the text column like the reference's.
+
+    Sits 12.1pt below the header's top; the next line's top follows 10.9pt
+    under it (8.8pt for the summary paragraph, which the reference sets
+    tighter -- hence the parameter)."""
+    from reportlab.lib.colors import HexColor
+    from reportlab.platypus import HRFlowable
+    return HRFlowable(width=_doc_width() + 2 * RULE_OVERHANG, thickness=0.72,
+                      color=HexColor(CV_ACCENT_COLOR), hAlign="CENTER",
+                      spaceBefore=1.7, spaceAfter=space_after)
+
+
+def _date_range_for_pdf(start, end) -> str:
+    """The reference separates the two dates with an en dash. The plain-text
+    rendering keeps its ASCII hyphen, which is what rescoring reads."""
+    text = format_date_range(start, end)
+    return text.replace(" - ", " – ") if _fonts()["ttf"] else text
+
+
+def _entry_row(left_html: str, right_html: str, styles, width, scale: float = 1.0):
     """The blueprint's defining row: title and employer on the left, dates and
     location right-aligned on the same baseline. A two-cell table rather than
     a tab stop, because platypus wraps a long left side onto a second line and
@@ -469,71 +589,75 @@ def _entry_row(left_html: str, right_html: str, styles, width):
 
     table = Table(
         [[Paragraph(left_html, styles["entry"]), Paragraph(right_html, styles["meta"])]],
-        colWidths=[width * 0.65, width * 0.35],
+        colWidths=[width * 0.7, width * 0.3],
         hAlign="LEFT",   # never centre-nudge the row off the page's left edge
     )
     table.setStyle(TableStyle([
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
         ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        # BOTTOM, so the 9pt dates share the 10pt title's baseline as in the
+        # reference, rather than riding a point above it.
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
     ]))
+    # As flowable space rather than cell padding: platypus collapses adjacent
+    # space to the larger value, which is how the reference's gaps behave
+    # (6.2pt after a bullet, but only the rule's own gap right under a header).
+    table.spaceBefore = round(6.2 * scale, 2)
+    table.spaceAfter = round(2.3 * scale, 2)
     return table
 
 
 def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
-    from reportlab.lib.colors import HexColor
-    from reportlab.platypus import Paragraph, Spacer, HRFlowable
+    from reportlab.platypus import Paragraph, Spacer
 
     styles = _styles(scale, section_gap)
     width = _doc_width()
-    accent = HexColor(CV_ACCENT_COLOR)
     story = []
 
     def clean(value):
         return _sanitize_for_pdf_font(str(value or "")).strip()
 
-    def section(title):
+    def section(title, rule_space_after=8.4):
         story.append(Paragraph(_xml_escape(title), styles["header"]))
-        story.append(HRFlowable(width="100%", thickness=0.75, color=accent,
-                                spaceBefore=1, spaceAfter=4))
+        story.append(_rule(rule_space_after))
 
-    # ---- header block ----
-    headline, name = clean(doc.get("headline")), clean(doc.get("name"))
-    if headline and name:
-        story.append(Paragraph(_inline(headline), styles["headline"]))
+    def meta(*parts):
+        return _xml_escape(" | ".join(p for p in parts if p))
+
+    # ---- header block: name, then headline ----
+    name, headline = clean(doc.get("name")), clean(doc.get("headline"))
+    if name:
         story.append(Paragraph(_inline(name), styles["name"]))
-    elif name:
-        story.append(Paragraph(_inline(name), styles["headline"]))
-    elif headline:
-        story.append(Paragraph(_inline(headline), styles["headline"]))
+    if headline:
+        story.append(Paragraph(_inline(headline), styles["headline" if name else "name"]))
 
     contact = doc.get("contact") if isinstance(doc.get("contact"), dict) else {}
-    rendered = []
-    for key in ("email", "phone", "location", "linkedin", "github"):
+    rendered = [_xml_escape(clean(contact.get(key)))
+                for key in ("email", "phone", "location") if clean(contact.get(key))]
+    # Profiles print as a word, not a URL -- the reference's "Linkedin | Github".
+    for key, label in (("linkedin", "Linkedin"), ("github", "Github")):
         value = clean(contact.get(key))
-        if not value:
-            continue
-        rendered.append(_link(value, value, LINKS_COLOR)
-                        if key in ("linkedin", "github") and _browsable(value)
-                        else _xml_escape(value))
+        if value:
+            link = _link(value, label, LINKS_COLOR) if _browsable(value) else _xml_escape(value)
+            rendered.append(f'<font size="{round(META_SIZE * scale, 2)}">{link}</font>')
     if rendered:
         story.append(Paragraph("&nbsp;&nbsp;|&nbsp;&nbsp;".join(rendered), styles["contact"]))
 
     # ---- summary ----
     summary = clean(doc.get("summary"))
     if summary:
-        section("SUMMARY")
+        section("SUMMARY", rule_space_after=6.3)
         story.append(Paragraph(_inline(summary), styles["body"]))
 
     def bullets(items):
         for item in items or []:
             text = clean(item)
             if text:
-                story.append(Paragraph(f"\u2022&nbsp;&nbsp;{_inline(text)}", styles["bullet"]))
+                story.append(Paragraph(_inline(text), styles["bullet"], bulletText="\u2022"))
 
-    # ---- experience ----
+    # ---- experience: **Title** | Organization ......... dates | location ----
     experience = [e for e in doc.get("experience") or [] if isinstance(e, dict)]
     if experience:
         section("EXPERIENCE")
@@ -541,43 +665,40 @@ def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
             left = " | ".join(p for p in (f"<b>{_inline(clean(entry.get('title')))}</b>"
                                           if entry.get("title") else "",
                                           _inline(clean(entry.get("organization")))) if p)
-            right = " | ".join(p for p in (
-                _xml_escape(format_date_range(entry.get("start"), entry.get("end"))),
-                _xml_escape(clean(entry.get("location")))) if p)
-            story.append(_entry_row(left, right, styles, width))
+            right = meta(_date_range_for_pdf(entry.get("start"), entry.get("end")),
+                         clean(entry.get("location")))
+            story.append(_entry_row(left, right, styles, width, scale))
             bullets(entry.get("bullets"))
 
-    # ---- projects ----
+    # ---- projects: the whole name in bold, dates only ----
     projects = [p for p in doc.get("projects") or [] if isinstance(p, dict)]
     if projects:
         section("PROJECTS")
         for entry in projects:
-            parts = [f"<b>{_inline(clean(entry.get('name')))}</b>"] if entry.get("name") else []
+            left = f"<b>{_inline(clean(entry.get('name')))}</b>" if entry.get("name") else ""
             if _browsable(entry.get("url")):
-                parts.append(f" | ({_link(clean(entry.get('url')), 'Link')})")
-            left = " ".join(parts)
-            right = _xml_escape(format_date_range(entry.get("start"), entry.get("end")))
-            story.append(_entry_row(left, right, styles, width))
+                left += f" | {_link(clean(entry.get('url')), 'Link')}"
+            right = meta(_date_range_for_pdf(entry.get("start"), entry.get("end")))
+            story.append(_entry_row(left, right, styles, width, scale))
             bullets(entry.get("bullets"))
         note = clean(doc.get("note"))
         if note:
             story.append(Paragraph(_inline(note), styles["note"]))
 
-    # ---- education ----
+    # ---- education: **Degree in Field** | Institution ..... dates | location ----
     education = [e for e in doc.get("education") or [] if isinstance(e, dict)]
     if education:
         section("EDUCATION")
         for entry in education:
-            degree = ", ".join(p for p in (clean(entry.get("degree")),
-                                           clean(entry.get("field"))) if p)
+            degree = " in ".join(p for p in (clean(entry.get("degree")),
+                                             clean(entry.get("field"))) if p)
             left = " | ".join(p for p in (f"<b>{_inline(degree)}</b>" if degree else "",
                                           _inline(clean(entry.get("institution")))) if p)
-            right = " | ".join(p for p in (
-                _xml_escape(format_date_range(entry.get("start"), entry.get("end"))),
-                _xml_escape(clean(entry.get("location")))) if p)
-            story.append(_entry_row(left, right, styles, width))
+            right = meta(_date_range_for_pdf(entry.get("start"), entry.get("end")),
+                         clean(entry.get("location")))
+            story.append(_entry_row(left, right, styles, width, scale))
 
-    # ---- skills ----
+    # ---- skills: **Category:** items ----
     groups = [g for g in doc.get("skills") or []
               if isinstance(g, dict) and g.get("items")]
     if groups:
@@ -586,7 +707,7 @@ def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
             category = clean(group.get("category"))
             items = ", ".join(clean(i) for i in group["items"] if clean(i))
             label = f"<b>{_inline(category)}:</b> " if category else ""
-            story.append(Paragraph(f"{label}{_inline(items)}", styles["body"]))
+            story.append(Paragraph(f"{label}{_inline(items)}", styles["skills"]))
 
     if not story:
         story.append(Spacer(1, 1))
@@ -666,10 +787,8 @@ def _looks_like_bullet(line: str) -> bool:
 def _legacy_story(cv_text: str, styles):
     """The pre-blueprint layout, kept for plain-text input: name, contact line,
     ALL-CAPS headers with a rule, '- ' bullets."""
-    from reportlab.lib.colors import HexColor
-    from reportlab.platypus import Paragraph, Spacer, HRFlowable
+    from reportlab.platypus import Paragraph, Spacer
 
-    accent = HexColor(CV_ACCENT_COLOR)
     story = []
     found_name = False
     checked_contact_line = False
@@ -681,7 +800,7 @@ def _legacy_story(cv_text: str, styles):
             continue
 
         if not found_name:
-            story.append(Paragraph(_inline(line), styles["headline"]))
+            story.append(Paragraph(_inline(line), styles["name"]))
             found_name = True
             continue
 
@@ -694,11 +813,10 @@ def _legacy_story(cv_text: str, styles):
 
         if _looks_like_bullet(line):
             text = re.sub(r"^[-*•–]\s+", "", line)
-            story.append(Paragraph(f"\u2022&nbsp;&nbsp;{_inline(text)}", styles["bullet"]))
+            story.append(Paragraph(_inline(text), styles["bullet"], bulletText="\u2022"))
         elif _looks_like_header(line):
             story.append(Paragraph(_inline(line), styles["header"]))
-            story.append(HRFlowable(width="100%", thickness=0.75, color=accent,
-                                    spaceBefore=1, spaceAfter=6))
+            story.append(_rule())
         else:
             story.append(Paragraph(_inline(line), styles["body"]))
 
