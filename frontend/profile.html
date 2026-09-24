@@ -10,163 +10,181 @@
 </head>
 <body data-page="profile">
 <main id="page">
-  <div class="profile-page mx-auto flex max-w-5xl flex-col">
-    <div class="mb-6 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+  <div class="profile-page flex flex-col">
+    <div class="mb-space-lg flex items-end justify-between gap-space-lg">
       <div>
-        <div class="mb-3 flex flex-wrap items-center gap-2">
-          <span class="sa-eyebrow">Identity center</span>
-          <span class="sa-chip-teal"><span class="ms text-[14px]">verified</span>Deterministic ground truth</span>
-        </div>
-        <h1 class="sa-page-title">Profile &amp; Career Ground Truth</h1>
-        <p class="sa-page-desc">Extracted from your CV. Edit anything that was read incorrectly — this authoritative record is what Sa'ei's scoring and CV tailoring both read from.</p>
+        <h1 class="text-headline-lg text-on-surface">Career Profile</h1>
+        <p class="mt-1 max-w-xl text-body-md text-on-surface-variant">Your verified ground truth — what Sa'ei scores opportunities against and tailors every application from.</p>
       </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <button type="button" class="sa-btn" id="btn-re-extract"><span class="ms text-[18px]">restart_alt</span>Re-extract from CV</button>
-        <button type="button" class="sa-btn-primary" id="btn-save"><span class="ms text-[18px]">save</span>Save changes</button>
+      <div class="flex items-center gap-space-sm">
+        <button type="button" class="sa-btn bg-surface-container-lowest" id="btn-re-extract"><span class="ms text-[18px]">sync</span>Re-extract from CV</button>
+        <button type="button" class="sa-btn-primary" id="btn-save"><span class="ms text-[18px]">verified</span>Save changes</button>
       </div>
     </div>
 
-    <div class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-surface-container-low px-4 py-3" id="profile-status">
-      <span class="flex min-w-0 items-center gap-2 text-body-sm text-on-surface-variant">
-        <span class="ms text-[18px] text-primary">description</span>
-        <span id="profile-source">Loading&hellip;</span>
-      </span>
-      <span class="sa-chip-amber profile-unsaved" id="profile-unsaved" hidden>Unsaved changes</span>
+    <!-- Identity card -->
+    <section class="sa-card mb-space-lg flex items-start gap-space-lg p-space-lg">
+      <div class="relative flex-shrink-0">
+        <div class="flex h-20 w-20 items-center justify-center rounded-xl bg-primary-fixed text-headline-md text-primary" id="id-initials">&mdash;</div>
+        <span class="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-tertiary-container ring-2 ring-surface-container-lowest"></span>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-x-space-sm gap-y-1">
+          <h2 class="text-headline-md text-on-surface" id="id-name">Your name</h2>
+          <span class="text-body-md text-on-surface-variant" id="id-title"></span>
+          <span class="hidden items-center gap-1 rounded-full bg-secondary-container px-2.5 py-0.5 text-label-sm normal-case tracking-normal text-on-secondary-fixed" id="id-location"></span>
+        </div>
+        <p class="mt-1 text-body-sm text-on-surface-variant" id="profile-status">
+          <span id="profile-source">Loading&hellip;</span>
+          <span class="profile-unsaved ml-2 rounded bg-tertiary-fixed px-1.5 py-0.5 text-label-sm normal-case tracking-normal text-on-tertiary-fixed-variant" id="profile-unsaved" hidden>Unsaved changes</span>
+        </p>
+        <p class="mt-space-sm max-w-3xl text-body-md text-on-surface" id="id-summary"></p>
+        <div class="mt-space-sm flex flex-wrap items-center gap-space-md text-label-sm normal-case tracking-normal text-on-surface-variant" id="id-links"></div>
+      </div>
+    </section>
+
+    <div id="profile-alert" class="profile-alert mb-space-md" hidden></div>
+
+    <div class="mb-space-md flex items-center justify-between rounded-lg bg-surface-container-low px-space-md py-space-sm">
+      <span class="flex items-center gap-2 text-body-sm text-on-surface-variant"><span class="ms text-[18px]">menu_book</span>Focused mode: one section opens at a time.</span>
+      <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">6 modules total</span>
     </div>
-    <div id="profile-alert" class="profile-alert" hidden></div>
 
-    <form id="profile-form" autocomplete="off">
+    <form id="profile-form" autocomplete="off" class="flex flex-col gap-space-sm">
 
-      <!-- Contact & summary -->
-      <section class="card profile-card">
-        <div class="card-header">
-          <h2><span class="ms profile-card-icon">contact_page</span>Contact &amp; Executive Summary</h2>
-        </div>
-        <div class="profile-grid">
-          <div class="form-field">
-            <label for="pf-full_name">Full name</label>
-            <input type="text" id="pf-full_name" data-contact="full_name" placeholder="Your name">
+      <section class="acc" data-acc="contact">
+        <button type="button" class="acc-head">
+          <span class="acc-icon"><span class="ms">contact_page</span></span>
+          <span class="acc-text"><span class="acc-title">1. About &amp; Contact <span class="acc-tag">Verified ground truth</span></span><span class="acc-sub" data-acc-sub="contact"></span></span>
+          <span class="acc-toggle"></span>
+        </button>
+        <div class="acc-body">
+          <div class="profile-grid">
+            <div class="form-field">
+              <label for="pf-full_name">Full name</label>
+              <input type="text" id="pf-full_name" data-contact="full_name" placeholder="Your name">
+            </div>
+            <div class="form-field">
+              <label for="pf-title">Professional title</label>
+              <input type="text" id="pf-title" data-contact="title" placeholder="e.g. AI Engineer">
+            </div>
+            <div class="form-field">
+              <label for="pf-email">Email</label>
+              <input type="text" id="pf-email" data-contact="email" placeholder="you@example.com">
+            </div>
+            <div class="form-field">
+              <label for="pf-phone">Phone</label>
+              <input type="text" id="pf-phone" data-contact="phone" placeholder="+20 100 000 0000">
+            </div>
+            <div class="form-field">
+              <label for="pf-location">Location</label>
+              <input type="text" id="pf-location" data-contact="location" placeholder="City, Country">
+            </div>
+            <div class="form-field">
+              <label for="pf-linkedin">LinkedIn</label>
+              <input type="text" id="pf-linkedin" data-contact="linkedin" placeholder="linkedin.com/in/&hellip;">
+            </div>
+            <div class="form-field">
+              <label for="pf-github">GitHub</label>
+              <input type="text" id="pf-github" data-contact="github" placeholder="github.com/&hellip;">
+            </div>
           </div>
-          <div class="form-field">
-            <label for="pf-title">Professional title</label>
-            <input type="text" id="pf-title" data-contact="title" placeholder="e.g. AI Engineer">
+          <div class="form-field profile-full-field">
+            <label for="pf-summary">Professional summary</label>
+            <textarea id="pf-summary" rows="4" placeholder="A short summary of who you are professionally."></textarea>
+            <p class="field-hint">Used as the starting point when a tailored CV is generated. Kept verbatim unless the rewrite reframes it for a specific job.</p>
           </div>
-          <div class="form-field">
-            <label for="pf-email">Email</label>
-            <input type="text" id="pf-email" data-contact="email" placeholder="you@example.com">
-          </div>
-          <div class="form-field">
-            <label for="pf-phone">Phone</label>
-            <input type="text" id="pf-phone" data-contact="phone" placeholder="+20 100 000 0000">
-          </div>
-          <div class="form-field">
-            <label for="pf-location">Location</label>
-            <input type="text" id="pf-location" data-contact="location" placeholder="City, Country">
-          </div>
-          <div class="form-field">
-            <label for="pf-linkedin">LinkedIn</label>
-            <input type="text" id="pf-linkedin" data-contact="linkedin" placeholder="linkedin.com/in/&hellip;">
-          </div>
-          <div class="form-field">
-            <label for="pf-github">GitHub</label>
-            <input type="text" id="pf-github" data-contact="github" placeholder="github.com/&hellip;">
-          </div>
-        </div>
-        <div class="form-field profile-full-field">
-          <label for="pf-summary">Professional summary</label>
-          <textarea id="pf-summary" rows="4" placeholder="A short summary of who you are professionally."></textarea>
-          <p class="field-hint">Used as the starting point when a tailored CV is generated. Kept verbatim unless the rewrite reframes it for a specific job.</p>
         </div>
       </section>
 
-      <!-- Experience -->
-      <section class="card profile-card">
-        <div class="card-header">
-          <h2><span class="ms profile-card-icon">work</span>Experience <span class="count-badge" id="count-experience">0</span></h2>
-          <button type="button" class="link-btn" data-add="experience">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add entry
-          </button>
+      <section class="acc" data-acc="experience">
+        <button type="button" class="acc-head">
+          <span class="acc-icon"><span class="ms">work</span></span>
+          <span class="acc-text"><span class="acc-title">2. Experience <span class="acc-tag"><span id="count-experience">0</span> roles</span></span><span class="acc-sub" data-acc-sub="experience"></span></span>
+          <span class="acc-toggle"></span>
+        </button>
+        <div class="acc-body">
+          <div class="entry-list" id="list-experience"></div>
+          <p class="empty-state" id="empty-experience" hidden>No experience entries yet.</p>
+          <button type="button" class="acc-add" data-add="experience"><span class="ms text-[18px]">add</span>Add entry</button>
         </div>
-        <div class="entry-list" id="list-experience"></div>
-        <p class="empty-state" id="empty-experience" hidden>No experience entries yet.</p>
       </section>
 
-      <!-- Projects -->
-      <section class="card profile-card">
-        <div class="card-header">
-          <h2><span class="ms profile-card-icon">rocket_launch</span>Projects <span class="count-badge" id="count-projects">0</span></h2>
-          <button type="button" class="link-btn" data-add="projects">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add entry
-          </button>
+      <section class="acc" data-acc="projects">
+        <button type="button" class="acc-head">
+          <span class="acc-icon"><span class="ms">terminal</span></span>
+          <span class="acc-text"><span class="acc-title">3. Projects <span class="acc-tag"><span id="count-projects">0</span> featured</span></span><span class="acc-sub" data-acc-sub="projects"></span></span>
+          <span class="acc-toggle"></span>
+        </button>
+        <div class="acc-body">
+          <div class="entry-list" id="list-projects"></div>
+          <p class="empty-state" id="empty-projects" hidden>No projects yet.</p>
+          <button type="button" class="acc-add" data-add="projects"><span class="ms text-[18px]">add</span>Add entry</button>
         </div>
-        <div class="entry-list" id="list-projects"></div>
-        <p class="empty-state" id="empty-projects" hidden>No projects yet.</p>
       </section>
 
-      <!-- Education -->
-      <section class="card profile-card">
-        <div class="card-header">
-          <h2><span class="ms profile-card-icon">school</span>Education <span class="count-badge" id="count-education">0</span></h2>
-          <button type="button" class="link-btn" data-add="education">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add entry
-          </button>
+      <section class="acc" data-acc="education">
+        <button type="button" class="acc-head">
+          <span class="acc-icon"><span class="ms">school</span></span>
+          <span class="acc-text"><span class="acc-title">4. Education <span class="acc-tag"><span id="count-education">0</span> entries</span></span><span class="acc-sub" data-acc-sub="education"></span></span>
+          <span class="acc-toggle"></span>
+        </button>
+        <div class="acc-body">
+          <div class="entry-list" id="list-education"></div>
+          <p class="empty-state" id="empty-education" hidden>No education entries yet.</p>
+          <button type="button" class="acc-add" data-add="education"><span class="ms text-[18px]">add</span>Add entry</button>
         </div>
-        <div class="entry-list" id="list-education"></div>
-        <p class="empty-state" id="empty-education" hidden>No education entries yet.</p>
       </section>
 
-      <!-- Certifications -->
-      <section class="card profile-card">
-        <div class="card-header">
-          <h2><span class="ms profile-card-icon">workspace_premium</span>Certifications <span class="count-badge" id="count-certifications">0</span></h2>
-          <button type="button" class="link-btn" data-add="certifications">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add certification
-          </button>
-        </div>
-        <div class="cert-table" id="cert-table" hidden>
-          <div class="cert-head">
-            <span>Certification</span>
-            <span>Issuer</span>
-            <span>Year</span>
-            <span class="cert-head-spacer" aria-hidden="true"></span>
+      <section class="acc" data-acc="skills">
+        <button type="button" class="acc-head">
+          <span class="acc-icon acc-icon-hot"><span class="ms">psychology</span></span>
+          <span class="acc-text"><span class="acc-title">5. Skills &amp; Competencies <span class="acc-tag acc-tag-hot">Active focus</span></span><span class="acc-sub"><span id="count-skills">0</span> skills cataloged</span></span>
+          <span class="acc-toggle"></span>
+        </button>
+        <div class="acc-body">
+          <div class="mb-space-sm flex items-center justify-between rounded-lg bg-surface-container-low px-space-md py-space-sm">
+            <span class="text-label-md font-semibold text-on-surface">Core &amp; listed skills</span>
+            <span class="flex items-center gap-1 text-body-sm text-secondary"><span class="ms text-[16px]">verified_user</span>What the scorer treats as “listed, not demonstrated”</span>
           </div>
-          <div class="entry-list" id="list-certifications"></div>
-        </div>
-        <div class="empty-panel" id="empty-certifications" hidden>
-          <svg viewBox="0 0 24 24" class="empty-panel-icon"><circle cx="12" cy="8" r="6"/><path d="M15.5 13.5 17 22l-5-3-5 3 1.5-8.5"/></svg>
-          <p>No certifications yet</p>
-          <button type="button" class="btn" data-add="certifications">Add certification</button>
+          <div class="chip-field" id="skills-field"></div>
+          <p class="empty-state" id="empty-skills" hidden>No skills yet.</p>
+          <div class="skill-entry mt-space-md">
+            <input type="text" id="skill-input" class="skill-input" placeholder="Add a skill (e.g., vLLM, TensorRT, Triton)&hellip;">
+            <button type="button" class="sa-btn" id="skill-add"><span class="ms text-[18px]">add</span>Add Skill</button>
+          </div>
+          <p class="field-hint mt-space-sm">Press Enter to add, or paste a comma-separated list. A skill named only here earns partial credit — mentioning it inside a role or project is what counts as demonstrated.</p>
         </div>
       </section>
 
-      <!-- Skills -->
-      <section class="card profile-card">
-        <div class="card-header">
-          <h2><span class="ms profile-card-icon">hub</span>Skills <span class="count-badge" id="count-skills">0</span></h2>
-          <span class="card-sub">What the scorer treats as “listed, not demonstrated”</span>
+      <section class="acc" data-acc="certifications">
+        <button type="button" class="acc-head">
+          <span class="acc-icon"><span class="ms">workspace_premium</span></span>
+          <span class="acc-text"><span class="acc-title">6. Certifications <span class="acc-tag">Optional</span></span><span class="acc-sub"><span id="count-certifications">0</span> added</span></span>
+          <span class="acc-toggle"></span>
+        </button>
+        <div class="acc-body">
+          <div class="cert-table" id="cert-table" hidden>
+            <div class="cert-head">
+              <span>Certification</span>
+              <span>Issuer</span>
+              <span>Year</span>
+              <span class="cert-head-spacer" aria-hidden="true"></span>
+            </div>
+            <div class="entry-list" id="list-certifications"></div>
+          </div>
+          <div class="empty-panel" id="empty-certifications" hidden>
+            <span class="ms text-[28px] text-on-surface-variant">workspace_premium</span>
+            <p>No certifications yet</p>
+          </div>
+          <button type="button" class="acc-add" data-add="certifications"><span class="ms text-[18px]">add</span>Add certification</button>
         </div>
-        <div class="skill-entry">
-          <input type="text" id="skill-input" class="skill-input" placeholder="Type a skill, e.g. PyTorch">
-          <button type="button" class="btn" id="skill-add">
-            <svg viewBox="0 0 24 24" class="btn-glyph"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add skill
-          </button>
-        </div>
-        <p class="field-hint skill-entry-hint">Press Enter to add. Paste a comma-separated list to add several at once.</p>
-        <div class="chip-field" id="skills-field"></div>
-        <p class="empty-state" id="empty-skills" hidden>No skills yet.</p>
-        <p class="field-hint">A skill named only here earns partial credit. Mentioning it inside a role or project above is what counts as demonstrated.</p>
       </section>
-
     </form>
 
-    <div class="profile-footer">
-      <span class="profile-footer-note">
-        <svg viewBox="0 0 24 24" class="profile-status-icon"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.6" r="0.6" fill="currentColor" stroke="none"/></svg>
+    <div class="profile-footer mt-space-lg">
+      <span class="profile-footer-note flex items-center gap-2">
+        <span class="ms text-[18px]">info</span>
         Your profile is used to score jobs and to generate tailored CVs.
       </span>
       <span class="profile-footer-actions">
@@ -176,7 +194,7 @@
       </span>
     </div>
 
-    <p class="mt-6 flex items-center justify-center gap-2 text-label-sm text-on-surface-variant">
+    <p class="mt-space-md flex items-center justify-center gap-2 text-body-sm text-on-surface-variant">
       <span class="ms text-[16px] text-secondary">lock</span>Profile data lives in your local database. <strong class="text-on-surface">Nothing here is uploaded anywhere.</strong>
     </p>
   </div>
@@ -208,5 +226,6 @@
 <script src="shell.js"></script>
 <script src="config.js"></script>
 <script src="profile.js"></script>
+<script src="profile-ui.js"></script>
 </body>
 </html>

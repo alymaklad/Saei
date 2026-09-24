@@ -72,6 +72,9 @@ def status():
         "dry_run": config.DRY_RUN,
         "whitelisted_sources": sorted(config.WHITELISTED_SOURCES),
         "llm_provider": config.LLM_PROVIDER,
+        # Whether reports can go out, for Settings -> Notifications. Never the
+        # token or chat id themselves.
+        "telegram_configured": bool(config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID),
     }
 
 

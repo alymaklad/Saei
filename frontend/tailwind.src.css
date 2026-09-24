@@ -53,15 +53,18 @@
   .ms-fill { font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24; }
 
   /* ---- surfaces ---- */
-  .sa-card { @apply rounded-3xl bg-surface-container-lowest p-6 shadow-sm; }
-  .sa-card-muted { @apply rounded-3xl bg-surface-container-low p-6 shadow-sm; }
-  .sa-tile { @apply rounded-2xl bg-surface-container-low p-4; }
-  .sa-eyebrow { @apply inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-label-sm font-bold uppercase tracking-wider text-primary; }
-  .sa-page-title { @apply text-display-lg-mobile text-on-surface md:text-display-lg; }
-  .sa-page-desc { @apply mt-1 max-w-2xl text-body-md text-on-surface-variant; }
-  .sa-section-title { @apply text-headline-md font-bold tracking-tight text-on-surface; }
-  .sa-card-title { @apply text-headline-sm font-bold text-on-surface; }
-  .sa-icon-badge { @apply flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary-fixed/60 text-primary; }
+  .sa-card { @apply rounded-xl bg-surface-container-lowest p-6 shadow-soft; }
+  .sa-card-muted { @apply rounded-xl bg-surface-container-low p-6; }
+  .sa-tile { @apply rounded-xl bg-surface-container-low p-4; }
+  /* Small caps label above a title ("DAILY OVERVIEW"). */
+  .sa-eyebrow { @apply inline-flex items-center gap-1.5 text-label-sm uppercase tracking-widest text-secondary; }
+  .sa-page-title { @apply text-display-lg-mobile tracking-tight text-on-surface md:text-display-lg; }
+  .sa-page-desc { @apply mt-1 max-w-2xl text-body-lg text-on-surface-variant; }
+  .sa-section-title { @apply text-headline-md text-on-surface; }
+  .sa-card-title { @apply text-headline-sm text-on-surface; }
+  .sa-icon-badge { @apply flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container text-primary; }
+  /* Hairline-divided list rows inside one white card (Recent Applications, Tailored CVs). */
+  .sa-list { @apply divide-y divide-surface-container overflow-hidden rounded-xl bg-surface-container-lowest shadow-soft; }
 
   /* ---- buttons ---- */
   .sa-btn {
@@ -96,34 +99,47 @@
 
   /* ---- chips / tabs ---- */
   .sa-chip { @apply inline-flex items-center gap-1 rounded-md bg-surface-container-highest px-2 py-0.5 text-label-sm font-semibold text-on-surface-variant; }
-  .sa-chip-teal { @apply inline-flex items-center gap-1 rounded-md bg-secondary-container px-2 py-0.5 text-label-sm font-bold text-on-secondary-container; }
+  /* "good" chip -- beige/brown in this palette (was teal). Name kept so older markup still works. */
+  .sa-chip-teal { @apply inline-flex items-center gap-1 rounded-md bg-secondary-container/70 px-2 py-0.5 text-label-sm font-semibold text-on-secondary-fixed-variant; }
   .sa-chip-primary { @apply inline-flex items-center gap-1 rounded-md bg-primary-fixed/70 px-2 py-0.5 text-label-sm font-bold text-primary; }
   .sa-chip-amber { @apply inline-flex items-center gap-1 rounded-md bg-tertiary-fixed px-2 py-0.5 text-label-sm font-bold text-on-tertiary-fixed-variant; }
   .sa-chip-error { @apply inline-flex items-center gap-1 rounded-md bg-error-container px-2 py-0.5 text-label-sm font-bold text-on-error-container; }
-  .sa-tabs { @apply inline-flex flex-wrap items-center gap-0.5 rounded-xl bg-surface-container-low p-1; }
-  .sa-tab { @apply rounded-lg px-3 py-1.5 text-label-md font-medium text-on-surface-variant transition-colors hover:text-on-surface; }
-  .sa-tab.is-active { @apply bg-surface-container-lowest font-bold text-on-surface shadow-xs; }
+  .sa-tabs { @apply inline-flex flex-wrap items-center gap-1 rounded-lg bg-surface-container-low p-1; }
+  .sa-tab { @apply rounded-lg px-3 py-1.5 text-label-md text-on-surface-variant transition-colors hover:text-on-surface; }
+  .sa-tab.is-active { @apply bg-primary font-semibold text-on-primary shadow-xs; }
 
-  /* ---- settings: selectable cards bound to a hidden <select> ---- */
-  .mode-card { @apply flex flex-col gap-1.5 rounded-2xl bg-surface-container-low p-5 text-left transition-all hover:bg-surface-container; }
-  .mode-card-kicker { @apply flex items-center justify-between text-label-sm font-bold uppercase tracking-wider text-on-surface-variant; }
-  .mode-card-kicker::after { content: ""; @apply h-4 w-4 rounded-full bg-surface-container-highest; }
-  .mode-card-title { @apply text-headline-sm font-semibold text-on-surface; }
-  .mode-card-desc { @apply flex-1 text-body-sm text-on-surface-variant; }
-  .mode-card-foot { @apply mt-3 flex items-center gap-1.5 text-label-sm font-medium text-on-surface-variant; }
-  .mode-card.is-active { @apply bg-surface-container-high shadow-md ring-2 ring-primary/40; }
-  .mode-card.is-active .mode-card-kicker { @apply text-primary; }
-  .mode-card.is-active .mode-card-kicker::after { @apply border-4 border-primary bg-surface-container-lowest; }
+  /* ---- profile accordion ---- */
+  .acc { @apply rounded-xl bg-surface-container-lowest shadow-soft; }
+  .acc-head { @apply flex w-full items-center gap-space-md px-space-lg py-space-md text-left; }
+  .acc-icon { @apply flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container text-on-surface-variant; }
+  .acc-icon-hot { @apply bg-primary-fixed/70 text-primary; }
+  .acc-text { @apply flex min-w-0 flex-1 flex-col; }
+  .acc-title { @apply flex flex-wrap items-center gap-2 text-headline-sm font-medium text-on-surface; }
+  .acc-tag { @apply text-label-sm normal-case tracking-normal text-on-surface-variant; }
+  .acc-tag::before { content: "• "; }
+  .acc-tag-hot { @apply rounded-full bg-secondary-container px-2 py-0.5 text-on-secondary-fixed; }
+  .acc-tag-hot::before { content: none; }
+  .acc-sub { @apply truncate text-body-sm text-on-surface-variant; }
+  .acc-toggle { @apply flex items-center gap-1 text-label-sm normal-case tracking-normal text-on-surface-variant; }
+  .acc-toggle::after { content: "expand_more"; font-family: "Material Symbols Outlined"; font-size: 18px; font-feature-settings: "liga"; }
+  .acc.is-open .acc-toggle::after { content: "expand_less"; }
+  .acc-body { @apply hidden border-t border-surface-container px-space-lg pb-space-lg pt-space-md; }
+  .acc.is-open .acc-body { @apply block; }
+  .acc-add { @apply mt-space-md inline-flex items-center gap-1 text-label-md text-primary hover:underline; }
 
-  .provider-card { @apply flex flex-col gap-1 rounded-2xl bg-surface-container-low p-4 text-left transition-all hover:bg-surface-container; }
-  .provider-card-head { @apply mb-2 flex items-center justify-between gap-2; }
-  .provider-dot { @apply h-2.5 w-2.5 rounded-full bg-surface-container-highest; }
-  .provider-badge { @apply rounded bg-surface-container-highest px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant; }
-  .provider-card-title { @apply text-label-lg text-on-surface; }
-  .provider-card-desc { @apply text-label-sm text-on-surface-variant; }
-  .provider-card.is-active { @apply bg-surface-container-high shadow-md ring-2 ring-primary/40; }
-  .provider-card.is-active .provider-dot { @apply bg-primary; }
-  .provider-card.is-active .provider-badge { @apply bg-primary text-on-primary; }
+  /* ---- settings: radio cards bound to a hidden <select> ---- */
+  .mode-card, .provider-card { @apply flex flex-col gap-1 rounded-lg bg-surface-container-low p-space-md text-left transition-all hover:bg-surface-container; }
+  .mode-card.is-active, .provider-card.is-active { @apply bg-surface-container-lowest shadow-soft ring-1 ring-surface-container-high; }
+  .mode-card-head, .provider-card-head { @apply flex items-center justify-between gap-space-sm; }
+  .mode-card-title, .provider-card-title { @apply flex items-center gap-space-sm text-headline-sm font-medium text-on-surface; }
+  .mode-card-title::before { content: ""; @apply h-4 w-4 flex-shrink-0 rounded-full border-2 border-outline; }
+  .mode-card.is-active .mode-card-title::before { @apply border-primary; box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 8px #9c3e1e; }
+  .provider-dot { @apply h-4 w-4 flex-shrink-0 rounded-full border-2 border-outline; }
+  .provider-card.is-active .provider-dot { @apply border-primary; box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 8px #9c3e1e; }
+  .provider-badge { @apply whitespace-nowrap rounded bg-surface-container-high px-1.5 py-0.5 text-label-sm normal-case tracking-normal text-on-surface-variant; }
+  .mode-card.is-active .provider-badge, .provider-card.is-active .provider-badge { @apply bg-tertiary-fixed/70 text-on-tertiary-fixed-variant; }
+  .mode-card-desc, .provider-card-desc { @apply pl-6 text-body-sm text-on-surface-variant; }
+  .mode-card-foot, .provider-card-meta { @apply mt-1 flex items-center gap-1.5 pl-6 text-label-sm normal-case tracking-normal text-on-surface-variant; }
 
   .sa-range { @apply h-1.5 w-full cursor-pointer appearance-none rounded-full bg-surface-container-highest; accent-color: #9c3e1e; }
   .sa-range::-webkit-slider-thumb { @apply h-4 w-4 appearance-none rounded-full bg-primary shadow-md; }

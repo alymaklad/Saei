@@ -81,7 +81,7 @@ timeline
     8 AM daily : Search every source : Rank, score, tailor : Auto-submit or draft
     8 PM daily : Telegram summary of the day
     Monday 9 AM : Weekly news digest for your field
-    Any time : Launch discovery on the Search page runs the 8 AM pipeline on demand
+    Any time : Search on the Search page runs the 8 AM pipeline on demand
 ```
 
 ---
@@ -97,7 +97,7 @@ reaches search, ranking, scoring and tailoring the next time they run.
 
 ```mermaid
 flowchart TD
-    U["Upload CV<br/>(CV Studio page)"] -->|LLM extraction| P[("Profile")]
+    U["Upload CV<br/>(CV page)"] -->|LLM extraction| P[("Profile")]
     E["Hand edits<br/>(Profile page)"] --> P
     P --> QE["Query expansion"]
     P --> RK["Ranking"]
@@ -268,15 +268,13 @@ talks to the FastAPI backend in `api.py`, and its design comes from the
 
 | Page | What it's for |
 |---|---|
-| **Dashboard** | Stats, the pipeline stepper showing where things stand, top opportunities with an inline match audit, drafts awaiting review, top skill gaps, agent activity log |
-| **Search** | Target role, seniority, freshness and per-site limits; the list of job boards; *Launch discovery* to run the pipeline now; latest discoveries |
-| **Applications** | Every application, filterable, with an audit panel: ATS and match score rings, match breakdown, requirement evidence |
-| **CV Studio** | Master CV, upload, every tailored CV with its score change, and an **ATS & tailoring bench**: paste a job description and see the score and rewrite without saving anything |
-| **Profile** | Edit the extracted profile that every agent reads |
-| **Email** | Connect Gmail (OAuth), review pending drafts, send, view sent/failed history |
-| **Reports** | Skill-gap bars, the latest news digest, every Telegram report sent |
-| **Features** | The pipeline stages and the agent roster, each with one live number |
-| **Settings** | Auto-apply mode cards, ATS thresholds, LLM provider and keys, job-matching tuning |
+| **Home** | Greeting, the five-stage trajectory (Search → Match → Tailor → Apply → Grow), headline numbers, recent applications, and the skill gap Sa'ei noticed most |
+| **Search** | Role, experience level and freshness; the job boards to scan (*Manage sources*); *Search* runs the pipeline now; the best recent matches |
+| **Applications** | Every application, filterable, with a detail panel: match affinity, the factors behind it, ATS evidence — and **Submit Application**, which sends the email from your Gmail |
+| **CV** | Master CV (view, download, replace), every tailored CV with its before → after ATS score, and the **ATS & tailoring bench**: paste a job description and see the score and rewrite without saving anything |
+| **Profile** | The extracted profile every agent reads, as six focused sections that open one at a time |
+| **Reports** | Headline numbers, a plain-language momentum summary, skill-gap bars, where roles come from, the latest news digest, and every dispatch (Telegram reports and application emails) |
+| **Settings** | AI provider and keys, autonomy mode, ATS and match thresholds, advanced matching, and notification channels (Telegram status, Gmail connection) |
 
 Styling uses Tailwind, shipped **pre-compiled** as `frontend/tailwind.css`,
 and fonts are stored in the repo, so the dashboard needs no CDN and no build
@@ -327,7 +325,7 @@ recall. Everything here can also be changed on the **Settings** page.
 
 ### 3. Add your CV, then run
 
-Upload your CV on **CV Studio** (or drop it at `cv/current_cv.pdf`).
+Upload your CV on the **CV** page (or drop it at `cv/current_cv.pdf`).
 
 | | Command |
 |---|---|
@@ -421,7 +419,7 @@ agents/                 search · query_expansion · ranking · ats · cv_rewrit
                           evidence_retrieval, requirement_normalizer, embeddings, llm
 services/               embedding cache + per-CV semantic index
 jobs/                   entry points: daily_run, daily_report, weekly_news, apply_from_link
-frontend/               the Sa'ei dashboard (9 pages + shell.js, ui.js, config.js)
+frontend/               the Sa'ei dashboard (7 pages + shell.js, ui.js, config.js)
 bench/                  labelled matching cases, precision/recall + calibration
 tests/                  pytest suite
 deploy/gcp/             VM startup script, systemd units, cloudflared config

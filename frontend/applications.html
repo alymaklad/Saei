@@ -10,122 +10,109 @@
 </head>
 <body data-page="applications">
 <main id="page">
-  <div class="flex flex-col space-y-6">
-
-    <div class="flex flex-col justify-between gap-6 xl:flex-row xl:items-end">
-      <div>
-        <h1 class="sa-page-title">Applications Pipeline &amp; Explainable Audit</h1>
-        <p class="sa-page-desc">Track drafted, tailored and submitted applications, with requirement-by-requirement scoring and no black-box deductions.</p>
-      </div>
-      <div class="flex items-center gap-4 self-start rounded-2xl bg-surface-container-low p-3 pl-5 shadow-sm xl:self-auto">
-        <div>
-          <span class="block text-label-sm text-on-surface-variant">Tailored CVs</span>
-          <span class="text-headline-sm font-bold text-on-surface" id="hdr-tailored">&mdash;</span>
-        </div>
-        <div class="h-10 w-px bg-surface-container-highest"></div>
-        <div>
-          <span class="block text-label-sm text-on-surface-variant">Review priority</span>
-          <span class="text-headline-sm font-bold text-primary"><span id="hdr-pending">&mdash;</span> actionable</span>
-        </div>
-        <a href="search.html" class="sa-btn-primary ml-2"><span class="ms text-[18px]">bolt</span>Run search</a>
-      </div>
+  <div class="flex flex-col">
+    <div class="mb-space-lg">
+      <h1 class="sa-page-title">Applications</h1>
+      <p class="sa-page-desc">Track, review, and send tailored applications — every score explained requirement by requirement.</p>
     </div>
 
-    <!-- Filter bar -->
-    <div class="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-3 shadow-sm lg:flex-row lg:items-center">
+    <div class="mb-space-lg flex flex-wrap items-center justify-between gap-space-md">
       <div class="sa-tabs" id="status-tabs">
-        <button type="button" class="sa-tab is-active" data-filter="all">All <span class="opacity-70" data-count="all"></span></button>
-        <button type="button" class="sa-tab" data-filter="pending_review">Review needed <span class="opacity-70" data-count="pending_review"></span></button>
-        <button type="button" class="sa-tab" data-filter="tailored">Tailored <span class="opacity-70" data-count="tailored"></span></button>
-        <button type="button" class="sa-tab" data-filter="applied">Submitted <span class="opacity-70" data-count="applied"></span></button>
+        <button type="button" class="sa-tab is-active" data-filter="all">All <span class="ml-1 opacity-70" data-count="all"></span></button>
+        <button type="button" class="sa-tab" data-filter="pending_review">Ready to apply <span class="ml-1 opacity-70" data-count="pending_review"></span></button>
+        <button type="button" class="sa-tab" data-filter="tailored">Tailored <span class="ml-1 opacity-70" data-count="tailored"></span></button>
+        <button type="button" class="sa-tab" data-filter="applied">Submitted <span class="ml-1 opacity-70" data-count="applied"></span></button>
       </div>
-      <div class="flex flex-1 flex-col gap-2 sm:flex-row">
-        <label class="relative flex-1">
-          <span class="ms pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant">search</span>
-          <input type="text" id="app-filter" class="sa-input pl-9" placeholder="Filter by company or title&hellip;">
+      <div class="flex items-center gap-space-sm">
+        <label class="relative">
+          <span class="ms pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant">search</span>
+          <input type="text" id="app-filter" class="sa-input w-56 bg-surface-container-lowest py-2 pl-9" placeholder="Filter role or company&hellip;">
         </label>
+        <span class="ms text-[18px] text-on-surface-variant">tune</span>
         <div class="sa-select-wrap">
-          <select id="score-filter" class="sa-select" aria-label="Minimum match">
-            <option value="0">Any match</option>
-            <option value="0.5">Match ≥ 50%</option>
-            <option value="0.75">Match ≥ 75%</option>
-            <option value="0.85">Match ≥ 85%</option>
-          </select>
-        </div>
-        <div class="sa-select-wrap">
-          <select id="source-filter" class="sa-select" aria-label="Source">
-            <option value="">All sources</option>
-          </select>
-        </div>
-        <div class="sa-select-wrap">
-          <select id="sort-select" class="sa-select" aria-label="Sort">
-            <option value="match_score">Best match</option>
-            <option value="ats_score">Best ATS</option>
-            <option value="date_created">Newest</option>
+          <select id="sort-select" class="sa-select border-none bg-transparent py-2 pl-1 text-label-md text-on-surface-variant" aria-label="Sort">
+            <option value="match_score">Sorted by match</option>
+            <option value="ats_score">Sorted by ATS score</option>
+            <option value="date_created">Sorted by newest</option>
           </select>
         </div>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
-      <!-- Stream -->
-      <div class="flex flex-col space-y-6 xl:col-span-7">
-        <div class="overflow-hidden rounded-3xl bg-surface-container-low shadow-sm">
-          <div class="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
-            <div class="flex items-center gap-3">
-              <h2 class="text-headline-md font-bold text-on-surface">Active Stream</h2>
-              <span class="sa-chip-teal" id="selection-chip" hidden></span>
-            </div>
-            <span class="text-label-sm text-on-surface-variant" id="sort-label"></span>
+    <div class="grid grid-cols-12 items-start gap-space-lg">
+      <!-- List -->
+      <div class="col-span-7 flex flex-col gap-space-md">
+        <div class="overflow-hidden rounded-xl bg-surface-container-lowest shadow-soft">
+          <div class="grid grid-cols-[1fr_7rem_9rem_2.5rem] gap-space-sm bg-surface-container-low px-space-md py-space-sm text-label-sm uppercase tracking-wider text-on-surface-variant">
+            <span>Role &amp; entity</span><span>Signal</span><span>Status</span><span class="text-right">Action</span>
           </div>
-          <div class="flex flex-col" id="app-list">
+          <div id="app-list" class="divide-y divide-surface-container">
             <p class="sa-empty">Loading&hellip;</p>
           </div>
-          <div class="flex items-center justify-between gap-4 px-6 py-4">
-            <span class="text-label-sm text-on-surface-variant" id="page-info"></span>
-            <div class="flex items-center gap-2">
-              <button type="button" class="sa-btn sa-btn-sm" id="page-prev">Prev</button>
-              <span class="text-label-sm font-semibold text-on-surface" id="page-num"></span>
-              <button type="button" class="sa-btn sa-btn-sm" id="page-next">Next</button>
-            </div>
+          <div class="flex items-center justify-between px-space-md py-space-sm" id="list-footer" hidden>
+            <span class="text-body-sm text-on-surface-variant" id="list-count"></span>
+            <button type="button" class="sa-btn-ghost" id="list-more">Show more</button>
           </div>
         </div>
 
-        <div class="sa-card">
-          <div class="mb-4 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="ms text-primary">query_stats</span>
-              <h3 class="sa-card-title">Sa'ei Career Alignment Vector</h3>
-            </div>
-            <span class="text-label-sm font-semibold text-secondary" id="vector-scope"></span>
-          </div>
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div class="rounded-2xl bg-surface-container-low p-4">
-              <span class="block text-label-sm text-on-surface-variant">Average match</span>
-              <span class="text-headline-lg font-bold text-on-surface" id="vec-match">&mdash;</span>
-              <div class="sa-progress mt-3"><div class="bg-primary" id="vec-match-bar" style="width:0%"></div></div>
-            </div>
-            <div class="rounded-2xl bg-surface-container-low p-4">
-              <span class="block text-label-sm text-on-surface-variant">Average ATS (best CV)</span>
-              <span class="text-headline-lg font-bold text-on-surface" id="vec-ats">&mdash;</span>
-              <div class="sa-progress mt-3"><div class="bg-secondary" id="vec-ats-bar" style="width:0%"></div></div>
-            </div>
-            <div class="rounded-2xl bg-surface-container-low p-4">
-              <span class="block text-label-sm text-on-surface-variant">Share tailored</span>
-              <span class="text-headline-lg font-bold text-on-surface" id="vec-tailored">&mdash;</span>
-              <div class="sa-progress mt-3"><div class="bg-tertiary" id="vec-tailored-bar" style="width:0%"></div></div>
+        <a href="cv.html" class="flex items-center justify-between gap-space-md rounded-xl bg-surface-container-low px-space-md py-space-md hover:bg-surface-container" id="alignment-banner" hidden>
+          <div class="flex items-center gap-space-md">
+            <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-fixed/70 text-primary"><span class="ms">auto_awesome</span></span>
+            <div>
+              <p class="text-label-md text-on-surface">Autonomous CV Alignment</p>
+              <p class="text-body-sm text-on-surface-variant" id="alignment-text"></p>
             </div>
           </div>
-        </div>
+          <span class="flex items-center gap-0.5 whitespace-nowrap text-label-md text-primary">Review in CV <span class="ms text-[18px]">chevron_right</span></span>
+        </a>
+
+        <section class="sa-card p-space-md">
+          <div class="mb-space-sm flex items-center justify-between">
+            <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Source alignment</span>
+            <span class="text-label-sm normal-case tracking-normal text-on-surface-variant" id="source-scope"></span>
+          </div>
+          <div class="grid grid-cols-3 gap-space-sm" id="source-tiles"></div>
+        </section>
       </div>
 
-      <!-- Audit panel -->
-      <aside class="sa-card xl:sticky xl:top-24 xl:col-span-5" id="audit-panel">
-        <p class="sa-empty">Select an application to audit it.</p>
+      <!-- Detail -->
+      <aside class="sa-card sticky top-24 col-span-5" id="detail">
+        <p class="sa-empty">Select an application.</p>
       </aside>
     </div>
   </div>
 </main>
+
+<!-- Submit (email) dialog: what used to be the Email page's send form -->
+<div class="modal-overlay" id="send-modal" hidden>
+  <div class="modal max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="send-title">
+    <form id="send-form" class="flex max-h-[calc(100vh-48px)] flex-col">
+      <div class="flex items-start justify-between gap-space-md border-b border-surface-container px-space-lg py-space-md">
+        <div>
+          <span class="sa-eyebrow">Submit application</span>
+          <h3 class="text-headline-sm text-on-surface" id="send-title">&mdash;</h3>
+        </div>
+        <button type="button" class="modal-close" id="send-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="flex flex-col gap-space-md overflow-y-auto px-space-lg py-space-md">
+        <p class="hidden rounded-lg bg-tertiary-fixed/60 px-space-md py-space-sm text-body-sm text-on-tertiary-fixed-variant" id="gmail-warning"></p>
+        <div class="grid grid-cols-[4.5rem_1fr] items-center gap-space-sm">
+          <label for="to-email" class="text-label-sm uppercase tracking-wider text-on-surface-variant">To</label>
+          <input type="text" id="to-email" class="sa-input font-mono" placeholder="hiring@company.com" required>
+          <label for="subject" class="text-label-sm uppercase tracking-wider text-on-surface-variant">Subject</label>
+          <input type="text" id="subject" class="sa-input font-semibold" required>
+        </div>
+        <textarea id="body" rows="9" class="sa-input resize-y leading-6" required></textarea>
+        <div class="flex items-center gap-space-sm rounded-lg bg-surface-container-low px-space-md py-space-sm" id="attachment"></div>
+      </div>
+      <div class="flex items-center justify-end gap-space-sm border-t border-surface-container px-space-lg py-space-md">
+        <span id="send-message" class="save-message mr-auto"></span>
+        <button type="button" class="sa-btn" id="send-cancel">Cancel</button>
+        <button type="submit" class="sa-btn-primary" id="send-btn"><span class="ms text-[18px]">send</span>Send application</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <div class="modal-overlay" id="why-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="why-modal-title">

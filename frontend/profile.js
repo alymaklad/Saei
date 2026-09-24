@@ -64,6 +64,8 @@ function isDirty() {
 function markDirty() {
   const pill = document.getElementById("profile-unsaved");
   if (pill) pill.hidden = !isDirty();
+  // The identity card and section summaries (profile-ui.js) follow every edit.
+  if (typeof window.renderProfileChrome === "function") window.renderProfileChrome();
 }
 
 /** A text/textarea input bound to a property on an object in state. */
