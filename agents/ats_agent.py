@@ -634,32 +634,38 @@ def _entailment_payload(unmatched: list[dict], evidence_spans: list[dict],
     slab, exactly as before.
     """
     if decisions:
-        general = [f"  - {s['text']}" for s in evidence_spans[:40]]
-        blocks, asked = [], 0
+        blocks, unnarrowed = [], []
         for requirement in unmatched:
             decision = decisions.get(_requirement_id(requirement))
             if decision is not None and decision.route == "adjudicate":
                 lines = "\n".join(f"  - {span.text}" for span in decision.spans())
-            elif config.SEMANTIC_RETRIEVAL_STRICT:
-                # Calibrated deployments may trust the floor and drop the
-                # requirement entirely -- that is the plan's "low similarity
-                # -> no match" band.
-                continue
-            else:
+                blocks.append(f'Requirement: {requirement["name"]}\n'
+                              f"Candidate CV lines:\n{lines}")
+            elif not config.SEMANTIC_RETRIEVAL_STRICT:
                 # Uncalibrated default: retrieval NARROWS the question, it
                 # never deletes it. A floor set too high otherwise removes a
                 # requirement from the call silently, and the row comes back
                 # "Not found" as if the CV had nothing -- which is exactly
                 # what happened to three requirements on a real tailored CV
-                # that had scored them the run before.
-                lines = "\n".join(general)
-            blocks.append(f'Requirement: {requirement["name"]}\n'
-                          f"Candidate CV lines:\n{lines}")
-            asked += 1
-        if not asked:
+                # that had scored them the run before. (STRICT, for calibrated
+                # deployments, trusts the floor and drops it: the plan's "low
+                # similarity -> no match" band.)
+                unnarrowed.append(requirement["name"])
+        if unnarrowed:
+            # Every requirement retrieval found nothing for is asked against
+            # the SAME general slab -- so it is printed once, with the names
+            # listed under it. Repeating it per requirement made this prompt
+            # grow by ~1k tokens per requirement: fifteen of them reached
+            # 15k tokens and Groq's free tier (8k tokens/minute, prompt plus
+            # reserved output) rejected the call before the model ran.
+            general = "\n".join(f"  - {s['text']}" for s in evidence_spans[:40])
+            names = "\n".join(f"  - {name}" for name in unnarrowed)
+            blocks.append(f"Requirements (each judged separately):\n{names}\n"
+                          f"Candidate CV lines for these requirements:\n{general}")
+        if not blocks:
             return None
         return ("Judge each requirement against ONLY the CV lines listed "
-                "under it.\n\n" + "\n\n".join(blocks))
+                "for it.\n\n" + "\n\n".join(blocks))
 
     lines = [f"- {s['text']}" for s in evidence_spans[:80]]
     wanted = [r["name"] for r in unmatched]
