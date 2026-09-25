@@ -333,7 +333,7 @@ Upload your CV on the **CV** page (or drop it at `cv/current_cv.pdf`).
 | Run the pipeline once | `python jobs/daily_run.py` |
 | Apply from one link | `python jobs/apply_from_link.py "https://boards.greenhouse.io/acme/jobs/123"` |
 | Always-on scheduler | `python scheduler.py` |
-| API + dashboard | `uvicorn api:app --port 8000` and `python -m http.server 5500 --directory frontend` |
+| API + dashboard | `uvicorn api:app --port 8001` and `python -m http.server 5500 --directory frontend` |
 
 Everything runs on your machine, so it stops when your machine sleeps. See
 [Deployment](#deployment) to keep it running unattended.

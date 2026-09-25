@@ -99,6 +99,18 @@
   main.parentNode.insertBefore(wrap, main);
   wrap.appendChild(column);
   column.appendChild(main);
+
+  // Page footer: the landscape mark and the caravan quote on every page, plus
+  // an optional page-specific note from <body data-footer="...">.
+  const note = document.body.dataset.footer || "";
+  main.insertAdjacentHTML("beforeend", `
+    <footer class="mt-space-xl flex items-center justify-between gap-space-md border-t border-surface-container pt-space-md text-body-sm text-on-surface-variant">
+      <span class="flex items-center gap-space-sm">
+        <span class="ms text-[18px] text-primary" aria-hidden="true">landscape</span>
+        <span class="italic">“Big dreams aren't reached in a single stride — the caravan advances step by deliberate step.”</span>
+      </span>
+      ${note ? `<span class="text-right">${note.replace(/</g, "&lt;")}</span>` : ""}
+    </footer>`);
   document.body.insertAdjacentHTML("afterbegin", sidebar);
 
   // ---- sidebar user card ----

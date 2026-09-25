@@ -134,6 +134,8 @@ function openWhyModalForRewrite(applicationId) {
     tailored_ats_score: r.tailored_ats_score,
     tailored_ats_breakdown: r.tailored_ats_breakdown,
     tailored_download_url: r.download_url,
+    title: r.job_title,
+    company: r.company,
   });
 }
 window.openWhyModalForRewrite = openWhyModalForRewrite;
