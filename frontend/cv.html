@@ -18,7 +18,12 @@
 
     <!-- Master CV -->
     <section class="sa-card relative mb-space-xl overflow-hidden p-space-lg">
-      <div class="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-gradient-to-l from-surface-container-low to-transparent"></div>
+      <!-- Same treatment as the Reports synthesis card: a soft warm glow
+           top-right and the word sa'i (striving) watermarked bottom-right. -->
+      <div class="pointer-events-none absolute -right-16 -top-16 h-80 w-80 rounded-full bg-secondary-container/40 blur-3xl"></div>
+      <div class="pointer-events-none absolute bottom-12 right-0 select-none pr-space-lg opacity-10" aria-hidden="true">
+        <span class="block text-[140px] font-bold leading-none text-primary" lang="ar">سعي</span>
+      </div>
       <div class="relative" id="cv-current">
         <p class="sa-empty">Loading&hellip;</p>
       </div>
