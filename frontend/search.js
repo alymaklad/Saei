@@ -230,7 +230,11 @@ document.getElementById("position-form").addEventListener("submit", async (e) =>
 
 // ---- snapshots --------------------------------------------------------------------
 
-const SOURCE_ICON = { greenhouse: "eco", generic: "language", weworkremotely: "public", lever: "work" };
+const SOURCE_ICON = {
+  greenhouse: "eco", generic: "language", weworkremotely: "public", lever: "work", ashby: "work",
+  smartrecruiters: "work", linkedin: "group", himalayas: "public", remotive: "public", jobicy: "public",
+  workingnomads: "public", remoteok: "public",
+};
 
 function snapshotCard(a) {
   const p = pct(a.match_score);

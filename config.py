@@ -154,6 +154,28 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 GREENHOUSE_BOARD_TOKENS = _list("GREENHOUSE_BOARD_TOKENS")
 LEVER_COMPANY_SLUGS = _list("LEVER_COMPANY_SLUGS")
+# Two more ATS vendors with public, keyless job-board feeds, read exactly like
+# Greenhouse/Lever above: the org slug from jobs.ashbyhq.com/<slug>, and the
+# company identifier from jobs.smartrecruiters.com/<Company>.
+ASHBY_BOARD_SLUGS = _list("ASHBY_BOARD_SLUGS")
+SMARTRECRUITERS_COMPANIES = _list("SMARTRECRUITERS_COMPANIES")
+
+# LinkedIn's logged-out job search (the same endpoint its public jobs page
+# uses). Each entry is a LinkedIn location searched once per role phrase;
+# "Worldwide" is searched as remote-only, since an on-site worldwide listing is
+# meaningless. Blank disables the source. LinkedIn's User Agreement forbids
+# automated collection, so requests are paced (LINKEDIN_REQUEST_DELAY seconds
+# apart -- under ~1.5s gets the IP blocked for an hour) and descriptions are
+# fetched only for jobs that survive the title filter.
+LINKEDIN_LOCATIONS = _list("LINKEDIN_LOCATIONS")
+LINKEDIN_REQUEST_DELAY = _float("LINKEDIN_REQUEST_DELAY", 2.0)
+
+# Where the candidate can legally work from, for remote boards that say who a
+# job is open to (Himalayas, Remotive, Jobicy, Working Nomads). A job is kept
+# when it's open worldwide, names no restriction, or its restriction mentions
+# any of these (e.g. "Egypt,EMEA,MENA,Middle East,Africa"). Blank keeps
+# everything.
+SEARCH_ELIGIBLE_LOCATIONS = _list("SEARCH_ELIGIBLE_LOCATIONS")
 
 # Default position/title to search for -- used by the Search tab's "search
 # now" button and by the scheduler's automatic 8am run alike, so both stay in
