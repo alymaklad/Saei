@@ -17,6 +17,13 @@ Free sources, in priority order:
      regular rows after that -- removable from the Search tab like any other
      site.
   7. SerpAPI (Google Jobs)  — free tier, 100 searches/month, optional
+  8. Himalayas, Remotive, Jobicy, Working Nomads — keyless remote-job APIs,
+     always on, screened by config.SEARCH_ELIGIBLE_LOCATIONS
+  9. Ashby / SmartRecruiters public job boards — no key, per-company like
+     Greenhouse/Lever (config.ASHBY_BOARD_SLUGS / SMARTRECRUITERS_COMPANIES,
+     or a pasted board URL on the Search tab)
+ 10. LinkedIn logged-out job search — opt-in via config.LINKEDIN_LOCATIONS,
+     paced, descriptions fetched only for jobs that pass the title filter
 
 RemoteOK and We Work Remotely are always-on structured sources (like
 Greenhouse/Lever) rather than SearchSite rows -- they need no per-user
@@ -38,6 +45,8 @@ WHITELISTABLE_SOURCES = {"greenhouse", "lever"}  # only these CAN ever be whitel
 
 GREENHOUSE_URL_RE = re.compile(r"(?:boards|job-boards)\.greenhouse\.io/([a-zA-Z0-9_-]+)", re.I)
 LEVER_URL_RE = re.compile(r"jobs\.lever\.co/([a-zA-Z0-9_-]+)", re.I)
+ASHBY_URL_RE = re.compile(r"jobs\.ashbyhq\.com/([a-zA-Z0-9_.-]+)", re.I)
+SMARTRECRUITERS_URL_RE = re.compile(r"(?:jobs|careers)\.smartrecruiters\.com/([a-zA-Z0-9_-]+)", re.I)
 
 # Heuristics for the generic-site scraper -- arbitrary career pages have no
 # consistent structure, so this is a best-effort signal, not a guarantee.
@@ -261,8 +270,8 @@ def _within_max_age(job: dict, max_age_days: int | None) -> bool:
 
 def parse_site_url(url: str) -> tuple[str, str | None]:
     """
-    Detects a pasted Greenhouse/Lever board URL and extracts its board
-    token/company slug, so it can reuse the reliable API-backed search
+    Detects a pasted Greenhouse/Lever/Ashby/SmartRecruiters board URL and
+    extracts its board token/company slug, so it can reuse the reliable API-backed search
     functions instead of falling back to generic scraping. Anything else is
     tagged "generic".
     """
@@ -272,6 +281,12 @@ def parse_site_url(url: str) -> tuple[str, str | None]:
     match = LEVER_URL_RE.search(url)
     if match:
         return "lever", match.group(1)
+    match = ASHBY_URL_RE.search(url)
+    if match:
+        return "ashby", match.group(1)
+    match = SMARTRECRUITERS_URL_RE.search(url)
+    if match:
+        return "smartrecruiters", match.group(1)
     return "generic", None
 
 
@@ -370,6 +385,333 @@ def search_weworkremotely(category: str = "remote-programming-jobs") -> list[dic
             "date": (item.findtext("pubDate") or "").strip() or None,  # RFC 822 -- see _extract_posted_at
         })
     return jobs
+
+
+# ---- Keyless remote-job APIs, ATS boards and LinkedIn -----------------------
+#
+# Every fetcher below returns the same normalized shape as search_remoteok():
+# title / company / url / description / date / location. Descriptions are
+# converted to plain text here, since they go straight into LLM prompts.
+
+BROWSER_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"),
+}
+LINKEDIN_MAX_JOBS = 25  # descriptions fetched per run -- each one is a paced request
+_WORLDWIDE_RE = re.compile(r"\b(worldwide|anywhere|global|international)\b", re.I)
+
+
+def _html_text(html: str | None) -> str:
+    from bs4 import BeautifulSoup
+    return BeautifulSoup(html or "", "html.parser").get_text("\n", strip=True)
+
+
+def _epoch_to_iso(value) -> str | None:
+    try:
+        return datetime.fromtimestamp(int(value), tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _eligible(restriction) -> bool:
+    """True when a remote job is open to the candidate: no restriction given,
+    open worldwide, or the restriction names one of
+    config.SEARCH_ELIGIBLE_LOCATIONS. `restriction` is free text ("USA Only",
+    "EMEA") or a list of countries, depending on the board."""
+    places = config.SEARCH_ELIGIBLE_LOCATIONS
+    if not places:
+        return True
+    if isinstance(restriction, (list, tuple)):
+        text = ", ".join(str(r) for r in restriction)
+    else:
+        text = str(restriction or "")
+    if not text.strip() or _WORLDWIDE_RE.search(text):
+        return True
+    low = text.lower()
+    return any(place.lower() in low for place in places)
+
+
+def _phrases(target_roles: list[str] | None) -> list[str]:
+    return [r for r in (target_roles or []) if r.strip()]
+
+
+def search_himalayas(target_roles: list[str] | None = None) -> list[dict]:
+    """Himalayas' keyless search API (https://himalayas.app/api), one query
+    per role phrase. Each job lists the countries it hires from
+    (locationRestrictions, empty = worldwide), which is what lets _eligible()
+    drop the US-only ones."""
+    phrases = _phrases(target_roles)
+    requests_to_make = (
+        [("https://himalayas.app/jobs/api/search", {"q": p}) for p in phrases]
+        or [("https://himalayas.app/jobs/api", {"limit": 20})]
+    )
+    jobs, seen = [], set()
+    for url, params in requests_to_make:
+        resp = requests.get(url, params=params, timeout=20, headers=GENERIC_SITE_HEADERS)
+        resp.raise_for_status()
+        for entry in resp.json().get("jobs", []):
+            job_url = entry.get("applicationLink") or entry.get("guid")
+            if not job_url or job_url in seen or not entry.get("title"):
+                continue
+            seen.add(job_url)
+            restrictions = entry.get("locationRestrictions") or []
+            if not _eligible(restrictions):
+                continue
+            jobs.append({
+                "title": entry["title"],
+                "company": entry.get("companyName", ""),
+                "url": job_url,
+                "description": _html_text(entry.get("description")),
+                "date": _epoch_to_iso(entry.get("pubDate")),
+                "location": f"Remote ({', '.join(restrictions) if restrictions else 'worldwide'})",
+            })
+    return jobs
+
+
+def search_remotive(target_roles: list[str] | None = None) -> list[dict]:
+    """Remotive's keyless API (https://remotive.com/api/remote-jobs), one
+    server-side search per role phrase. Remotive's terms ask that each job
+    links back to its Remotive page, which the stored url does."""
+    phrases = _phrases(target_roles) or [""]
+    jobs, seen = [], set()
+    for phrase in phrases:
+        params = {"search": phrase} if phrase else {"limit": 100}
+        resp = requests.get("https://remotive.com/api/remote-jobs", params=params,
+                            timeout=20, headers=GENERIC_SITE_HEADERS)
+        resp.raise_for_status()
+        for entry in resp.json().get("jobs", []):
+            job_url = entry.get("url")
+            if not job_url or job_url in seen or not entry.get("title"):
+                continue
+            seen.add(job_url)
+            where = entry.get("candidate_required_location") or ""
+            if not _eligible(where):
+                continue
+            jobs.append({
+                "title": entry["title"],
+                "company": entry.get("company_name", ""),
+                "url": job_url,
+                "description": _html_text(entry.get("description")),
+                "date": entry.get("publication_date"),
+                "location": f"Remote ({where or 'worldwide'})",
+            })
+    return jobs
+
+
+def search_jobicy() -> list[dict]:
+    """Jobicy's keyless feed (https://jobicy.com/api/v2/remote-jobs) -- the
+    latest 100 remote jobs, title-filtered afterwards like RemoteOK. Its tag
+    search only takes single keywords, so the role phrases don't map onto it."""
+    resp = requests.get("https://jobicy.com/api/v2/remote-jobs", params={"count": 100},
+                        timeout=20, headers=GENERIC_SITE_HEADERS)
+    resp.raise_for_status()
+    jobs = []
+    for entry in resp.json().get("jobs", []):
+        if not entry.get("url") or not entry.get("jobTitle"):
+            continue
+        geo = entry.get("jobGeo") or ""
+        if not _eligible(geo):
+            continue
+        jobs.append({
+            "title": _html_text(entry["jobTitle"]),
+            "company": entry.get("companyName", ""),
+            "url": entry["url"],
+            "description": _html_text(entry.get("jobDescription")),
+            "date": entry.get("pubDate"),
+            "location": f"Remote ({geo or 'worldwide'})",
+        })
+    return jobs
+
+
+def search_workingnomads() -> list[dict]:
+    """Working Nomads' keyless feed of every open job, title-filtered
+    afterwards. Its titles are "Company - Title", so the company prefix is
+    stripped to keep the title filter honest."""
+    resp = requests.get("https://www.workingnomads.com/api/exposed_jobs/",
+                        timeout=30, headers=GENERIC_SITE_HEADERS)
+    resp.raise_for_status()
+    data = resp.json()
+    jobs = []
+    for entry in data if isinstance(data, list) else []:
+        title, company = entry.get("title") or "", entry.get("company_name") or ""
+        if not entry.get("url") or not title:
+            continue
+        if company and title.startswith(f"{company} - "):
+            title = title[len(company) + 3:]
+        where = entry.get("location") or ""
+        if not _eligible(where):
+            continue
+        jobs.append({
+            "title": title,
+            "company": company,
+            "url": entry["url"],
+            "description": _html_text(entry.get("description")),
+            "date": entry.get("pub_date"),
+            "location": where or "Remote",
+        })
+    return jobs
+
+
+def search_ashby(slug: str) -> list[dict]:
+    """An Ashby-hosted job board, via Ashby's public posting API -- the whole
+    board in one response, like Greenhouse."""
+    resp = requests.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}",
+                        params={"includeCompensation": "true"}, timeout=20)
+    resp.raise_for_status()
+    jobs = []
+    for entry in resp.json().get("jobs", []):
+        if not entry.get("jobUrl") or not entry.get("title") or entry.get("isListed") is False:
+            continue
+        location = entry.get("location") or ""
+        if entry.get("isRemote") and "remote" not in location.lower():
+            location = f"Remote ({location})" if location else "Remote"
+        jobs.append({
+            "title": entry["title"].strip(),
+            "company": slug.replace("-", " ").title(),
+            "url": entry["jobUrl"],
+            "description": entry.get("descriptionPlain") or _html_text(entry.get("descriptionHtml")),
+            "date": entry.get("publishedAt"),
+            "location": location,
+        })
+    return jobs
+
+
+def search_smartrecruiters(company: str, target_roles: list[str] | None = None) -> list[dict]:
+    """A SmartRecruiters company's public postings, searched server-side once
+    per role phrase (boards like Bosch's run to thousands of jobs, so pulling
+    everything isn't practical). The listing has no description; it's fetched
+    per job by enrich_smartrecruiters() once the title filter has run."""
+    phrases = _phrases(target_roles) or [""]
+    jobs, seen = [], set()
+    for phrase in phrases:
+        params = {"limit": 100, **({"q": phrase} if phrase else {})}
+        resp = requests.get(f"https://api.smartrecruiters.com/v1/companies/{company}/postings",
+                            params=params, timeout=20)
+        resp.raise_for_status()
+        for entry in resp.json().get("content", []):
+            if not entry.get("id") or entry["id"] in seen or not entry.get("name"):
+                continue
+            seen.add(entry["id"])
+            loc = entry.get("location") or {}
+            location = loc.get("fullLocation") or ", ".join(
+                part for part in (loc.get("city"), loc.get("country")) if part)
+            if loc.get("remote"):
+                location = f"Remote ({location})" if location else "Remote"
+            jobs.append({
+                "title": entry["name"],
+                "company": (entry.get("company") or {}).get("name") or company,
+                "url": f"https://jobs.smartrecruiters.com/{company}/{entry['id']}",
+                "description": "",
+                "date": entry.get("releasedDate"),
+                "location": location,
+                "detail_url": entry.get("ref"),
+            })
+    return jobs
+
+
+def enrich_smartrecruiters(job: dict) -> dict | None:
+    if not job.get("detail_url"):
+        return None
+    resp = requests.get(job["detail_url"], timeout=20)
+    resp.raise_for_status()
+    sections = ((resp.json().get("jobAd") or {}).get("sections") or {})
+    parts = []
+    for key in ("jobDescription", "qualifications", "additionalInformation", "companyDescription"):
+        section = sections.get(key) or {}
+        text = _html_text(section.get("text"))
+        if text:
+            parts.append(f"{section.get('title') or key}\n{text}")
+    return {**job, "description": "\n\n".join(parts)} if parts else None
+
+
+def search_linkedin(target_roles: list[str] | None = None, locations: list[str] | None = None,
+                    max_age_days: int | None = None) -> list[dict]:
+    """LinkedIn's logged-out job search -- the endpoint its own public jobs
+    page calls -- once per role phrase per location (first page, 10 cards).
+    "Worldwide" is searched as remote-only. Cards carry no description; that
+    is fetched by enrich_linkedin() for the few that survive the title
+    filter. A 429 ends the sweep early with whatever was already collected
+    rather than failing the source."""
+    from bs4 import BeautifulSoup
+    phrases = _phrases(target_roles)
+    locations = [l for l in (locations or []) if l.strip()]
+    jobs, seen, first = [], set(), True
+    for phrase in phrases:
+        for location in locations:
+            if not first:
+                time.sleep(config.LINKEDIN_REQUEST_DELAY)
+            first = False
+            params = {"keywords": phrase, "location": location, "start": 0}
+            if location.lower() == "worldwide":
+                params["f_WT"] = 2  # remote
+            if max_age_days and max_age_days > 0:
+                params["f_TPR"] = f"r{max_age_days * 86400}"
+            resp = requests.get(
+                "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
+                params=params, timeout=20, headers=BROWSER_HEADERS,
+            )
+            if resp.status_code == 429:
+                return jobs
+            resp.raise_for_status()
+            for card in BeautifulSoup(resp.text, "html.parser").select("div.base-card"):
+                job_id = (card.get("data-entity-urn") or "").rsplit(":", 1)[-1]
+                title_el = card.select_one(".base-search-card__title")
+                if not job_id.isdigit() or job_id in seen or not title_el:
+                    continue
+                seen.add(job_id)
+                company_el = card.select_one(".base-search-card__subtitle")
+                location_el = card.select_one(".job-search-card__location")
+                time_el = card.select_one("time")
+                where = location_el.get_text(strip=True) if location_el else ""
+                if params.get("f_WT") == 2 and "remote" not in where.lower():
+                    where = f"Remote ({where})" if where else "Remote"
+                jobs.append({
+                    "title": title_el.get_text(strip=True),
+                    "company": company_el.get_text(strip=True) if company_el else "",
+                    "url": f"https://www.linkedin.com/jobs/view/{job_id}/",
+                    "description": "",
+                    "date": time_el.get("datetime") if time_el else None,
+                    "location": where,
+                    "linkedin_id": job_id,
+                })
+    return jobs
+
+
+def enrich_linkedin(job: dict) -> dict | None:
+    from bs4 import BeautifulSoup
+    time.sleep(config.LINKEDIN_REQUEST_DELAY)
+    resp = requests.get(
+        f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job['linkedin_id']}",
+        timeout=20, headers=BROWSER_HEADERS,
+    )
+    resp.raise_for_status()
+    page = BeautifulSoup(resp.text, "html.parser")
+    body = page.select_one("div.show-more-less-html__markup")
+    if not body:
+        return None
+    criteria = []
+    for item in page.select("li.description__job-criteria-item"):
+        label, value = item.select_one("h3"), item.select_one("span")
+        if label and value:
+            criteria.append(f"{label.get_text(strip=True)}: {value.get_text(strip=True)}")
+    description = body.get_text("\n", strip=True)
+    if criteria:
+        description += "\n\n" + "\n".join(criteria)
+    return {**job, "description": description}
+
+
+def _already_saved(urls: list[str]) -> set[str]:
+    """URLs already in the jobs table, so a paced per-job description fetch
+    isn't spent on a posting the daily run would drop as known anyway."""
+    if not urls:
+        return set()
+    try:
+        from db import get_session
+        from models import Job
+        with get_session() as session:
+            return {r[0] for r in session.query(Job.url).filter(Job.url.in_(urls)).all()}
+    except Exception:  # noqa: BLE001 -- no DB (e.g. tests): just fetch them all
+        return set()
 
 
 def _looks_like_job_link(href: str, text: str) -> bool:
@@ -534,6 +876,19 @@ KNOWN_JOB_BOARD_TEMPLATES = {
         # here, this source is only useful while searching for
         # software-adjacent titles.
         "build_url": lambda position: "https://www.gulftalent.com/jobs/category/software",
+    },
+    "tanqeeb": {
+        "label": "Tanqeeb (Egypt)",
+        "default_url": "https://egypt.tanqeeb.com/",
+        # Confirmed working: ?keywords= genuinely filters server-side, and the
+        # results link to server-rendered /jobs-in-egypt/.../<id>.html pages
+        # whose link text is the job title, so the generic scraper's
+        # position narrowing picks exactly the listings. Other countries use
+        # the same pattern on their own subdomain (uae., saudi., qatar., ...).
+        "build_url": lambda position: (
+            f"https://egypt.tanqeeb.com/jobs/search?keywords={quote_plus(position)}"
+            if position.strip() else None
+        ),
     },
 }
 
@@ -738,7 +1093,7 @@ def run_search(
     semantic_candidates = []  # title-MISMATCHED jobs, for the semantic retriever
     source_errors = []
 
-    def _collect(source_name, identifier, fetch, tag):
+    def _collect(source_name, identifier, fetch, tag, enrich=None, limit=None):
         """fetch -> filter -> cap, tagging each job with its source and
         recording the count at every step for the debug report. Returns the
         tagged jobs, or [] if the source failed (recorded, never raised).
@@ -748,6 +1103,13 @@ def run_search(
         `semantic_candidates` so the semantic retriever downstream can still
         rescue the ones whose description genuinely fits the CV. Seniority
         mismatches ARE discarded outright, since seniority stays a hard filter.
+
+        `enrich` is for sources whose listing has no description (LinkedIn,
+        SmartRecruiters): it fetches one job's full posting and runs only on
+        the jobs that survive filter + cap and aren't already saved, so its
+        per-job requests stay few. Those sources' title mismatches aren't
+        offered to the semantic retriever -- with no description there is
+        nothing for it to judge. `limit` tightens the per-site cap for them.
         """
         started = time.perf_counter()
         try:
@@ -759,7 +1121,25 @@ def run_search(
                                 seconds=time.perf_counter() - started, error=str(exc))
             return []
         filtered = _filter_relevant(raw, target_roles, seniority)
-        capped = _cap(filtered, max_results_per_site)
+        if enrich:
+            known = _already_saved([j["url"] for j in filtered if j.get("url")])
+            filtered = [j for j in filtered if j.get("url") not in known]
+        caps = [c for c in (max_results_per_site, limit) if c]
+        capped = _cap(filtered, min(caps) if caps else None)
+        if enrich:
+            enriched = []
+            for job in capped:
+                try:
+                    full = enrich(job)
+                except requests.RequestException as exc:
+                    source_errors.append({"source": source_name, "identifier": job.get("url"), "error": str(exc)})
+                    trace.record_error(source_name, job.get("url"), exc)
+                    if getattr(exc.response, "status_code", None) == 429:
+                        break  # rate-limited: stop asking, keep what's done
+                    continue
+                if full:
+                    enriched.append(full)
+            capped = enriched
         trace.record_source(source_name, identifier, raw=len(raw),
                             after_filter=len(filtered), after_cap=len(capped),
                             seconds=time.perf_counter() - started)
@@ -774,7 +1154,7 @@ def run_search(
                 trace.record_retrieval({**tag, **job}, "token", "dropped",
                                        f"seniority doesn't match '{seniority}' (hard filter)")
                 continue
-            if include_title_mismatches:
+            if include_title_mismatches and not enrich:
                 rescuable.append({**tag, **job})
             else:
                 trace.record_retrieval({**tag, **job}, "token", "dropped",
@@ -804,6 +1184,32 @@ def run_search(
     # the expanded phrase list applies to it uniformly.
     broad += _collect("remoteok", None, search_remoteok, {"source": "remoteok"})
     broad += _collect("weworkremotely", None, search_weworkremotely, {"source": "weworkremotely"})
+
+    # Keyless remote boards. Himalayas and Remotive search server-side, once
+    # per role phrase (merged and deduped inside the fetcher, so the per-site
+    # cap covers the combined set); Jobicy and Working Nomads are whole feeds
+    # filtered by title like RemoteOK. All four drop jobs the candidate can't
+    # apply to (config.SEARCH_ELIGIBLE_LOCATIONS).
+    broad += _collect("himalayas", None, lambda: search_himalayas(target_roles), {"source": "himalayas"})
+    broad += _collect("remotive", None, lambda: search_remotive(target_roles), {"source": "remotive"})
+    broad += _collect("jobicy", None, search_jobicy, {"source": "jobicy"})
+    broad += _collect("workingnomads", None, search_workingnomads, {"source": "workingnomads"})
+
+    for slug in config.ASHBY_BOARD_SLUGS:
+        broad += _collect("ashby", slug, lambda s=slug: search_ashby(s),
+                          {"source": "ashby", "board": slug})
+
+    for company in config.SMARTRECRUITERS_COMPANIES:
+        broad += _collect("smartrecruiters", company,
+                          lambda c=company: search_smartrecruiters(c, target_roles),
+                          {"source": "smartrecruiters", "company_slug": company},
+                          enrich=enrich_smartrecruiters)
+
+    if config.LINKEDIN_LOCATIONS and target_roles:
+        broad += _collect("linkedin", ", ".join(config.LINKEDIN_LOCATIONS),
+                          lambda: search_linkedin(target_roles, config.LINKEDIN_LOCATIONS, max_age_days),
+                          {"source": "linkedin"},
+                          enrich=enrich_linkedin, limit=LINKEDIN_MAX_JOBS)
 
     watchlist_started = time.perf_counter()
     try:
@@ -837,6 +1243,17 @@ def run_search(
                                   lambda s=site: search_lever(s["identifier"]),
                                   {"source": "lever", "company_slug": site["identifier"],
                                    "site_url": site["url"]})
+            elif site["site_type"] == "ashby":
+                broad += _collect("ashby", site["identifier"],
+                                  lambda s=site: search_ashby(s["identifier"]),
+                                  {"source": "ashby", "board": site["identifier"],
+                                   "site_url": site["url"]})
+            elif site["site_type"] == "smartrecruiters":
+                broad += _collect("smartrecruiters", site["identifier"],
+                                  lambda s=site: search_smartrecruiters(s["identifier"], target_roles),
+                                  {"source": "smartrecruiters", "company_slug": site["identifier"],
+                                   "site_url": site["url"]},
+                                  enrich=enrich_smartrecruiters)
             elif site["site_type"] in KNOWN_JOB_BOARD_TEMPLATES:
                 # Role 1. The stored URL is just a display/landing link -- the
                 # real, query-filtered search URL depends on the phrase and is

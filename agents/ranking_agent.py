@@ -210,7 +210,7 @@ def score_location(job: dict, prefer_remote: bool = True) -> tuple[float, str]:
     nothing at all. So this reads whatever text IS available and falls back to
     neutral rather than guessing."""
     source = (job.get("source") or "").lower()
-    if source in ("remoteok", "weworkremotely"):
+    if source in ("remoteok", "weworkremotely", "himalayas", "remotive", "jobicy", "workingnomads"):
         return 1.0, "Source is a remote-only job board."
 
     location_field = str(job.get("location") or "")

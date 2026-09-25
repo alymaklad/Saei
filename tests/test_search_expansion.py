@@ -97,6 +97,11 @@ def _no_sources(monkeypatch):
     monkeypatch.setattr(config, "LEVER_COMPANY_SLUGS", [])
     monkeypatch.setattr(search_agent, "search_remoteok", lambda *a, **k: [])
     monkeypatch.setattr(search_agent, "search_weworkremotely", lambda *a, **k: [])
+    for fn in ("search_himalayas", "search_remotive", "search_jobicy", "search_workingnomads"):
+        monkeypatch.setattr(search_agent, fn, lambda *a, **k: [])
+    monkeypatch.setattr(config, "ASHBY_BOARD_SLUGS", [])
+    monkeypatch.setattr(config, "SMARTRECRUITERS_COMPANIES", [])
+    monkeypatch.setattr(config, "LINKEDIN_LOCATIONS", [])
     monkeypatch.setattr(search_agent, "search_from_watchlist", lambda *a, **k: [])
     monkeypatch.setattr(search_agent, "get_configured_sites", lambda: [])
 
