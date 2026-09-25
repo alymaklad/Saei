@@ -21,6 +21,8 @@ function openWhyModalForApplication(id) {
     tailored_ats_score: a.tailored_ats_score,
     tailored_ats_breakdown: a.tailored_ats_breakdown,
     tailored_download_url: cvDownloadUrl(a.cv_path),
+    title: a.title,
+    company: a.company,
   });
 }
 window.openWhyModalForApplication = openWhyModalForApplication;

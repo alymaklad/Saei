@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/png" href="assets/saei-logo.png">
 </head>
-<body data-page="reports">
+<body data-page="reports" data-footer="Daily summary at 20:00 · news digest Mondays at 9:00 · both need the scheduler running">
 <main id="page">
   <div class="flex flex-col">
     <div class="mb-space-xl flex items-end justify-between gap-space-lg">
@@ -16,7 +16,7 @@
         <h1 class="sa-page-title">Career Reports</h1>
         <p class="sa-page-desc">A calm synthesis of your market reach, application momentum, and skill demand.</p>
       </div>
-      <button type="button" class="sa-btn-primary" onclick="window.print()"><span class="ms text-[18px]">download</span>Export PDF</button>
+      <!-- <button type="button" class="sa-btn-primary" onclick="window.print()"><span class="ms text-[18px]">download</span>Export PDF</button> -->
     </div>
 
     <!-- Stats -->
@@ -44,8 +44,14 @@
     </section>
 
     <!-- Editorial synthesis -->
-    <section class="relative mb-space-xl overflow-hidden rounded-xl bg-surface-container-low p-space-xl">
-      <span class="pointer-events-none absolute -bottom-6 right-6 select-none text-[140px] leading-none text-secondary-container/60" lang="ar" aria-hidden="true">سعي</span>
+    <section class="relative mb-space-xl overflow-hidden rounded-xl bg-surface-container-low p-space-xl shadow-sm">
+      <!-- As in the design: a soft warm glow top-right, and the word sa'i
+           (striving) set bold in primary at 10% opacity, fully inside the
+           card's bottom-right corner. -->
+      <div class="pointer-events-none absolute -right-16 -top-16 h-80 w-80 rounded-full bg-secondary-container/40 blur-3xl"></div>
+      <div class="pointer-events-none absolute bottom-12 right-0 select-none pr-space-lg opacity-10" aria-hidden="true">
+        <span class="block text-[140px] font-bold leading-none text-primary" lang="ar">سعي</span>
+      </div>
       <div class="relative max-w-3xl">
         <span class="sa-eyebrow mb-space-sm text-primary"><span class="ms text-[16px]">lightbulb</span>Editorial synthesis</span>
         <h2 class="mb-space-md text-headline-lg text-on-surface">Your Career Momentum</h2>
@@ -111,10 +117,6 @@
       </div>
     </div>
 
-    <p class="mt-space-xl flex items-center justify-between border-t border-surface-container pt-space-md text-body-sm text-on-surface-variant">
-      <span class="ms text-[18px] text-primary">landscape</span>
-      <span>Daily summary at 20:00 · news digest Mondays at 9:00 · both need the scheduler running</span>
-    </p>
   </div>
 </main>
 

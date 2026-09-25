@@ -1,6 +1,6 @@
 // Shared across every page -- include this <script> before any page-specific
 // script. Point API_BASE at wherever api.py is running (defaults to local).
-const API_BASE = window.JOB_AGENT_API_BASE || "http://localhost:8000";
+const API_BASE = window.JOB_AGENT_API_BASE || "http://localhost:8001";
 
 async function getJSON(path) {
   const res = await fetch(`${API_BASE}${path}`);

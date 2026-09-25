@@ -3,7 +3,7 @@ Dashboard + control API. Most endpoints are read-only views over the SQLite
 DB the agents write to (models.py/db.py); a few (settings, CV upload) let the
 frontend write configuration back to disk for a single local user.
 
-Run with: uvicorn api:app --reload --port 8000
+Run with: uvicorn api:app --reload --port 8001  (8001 locally; 8000 was taken by another project)
 """
 import importlib
 import json

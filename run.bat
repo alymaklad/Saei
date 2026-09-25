@@ -25,8 +25,8 @@ if not exist ".env" (
     exit /b 0
 )
 
-echo Starting dashboard API on http://localhost:8000 ...
-start "Job Agent - API" cmd /k .venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8000
+echo Starting dashboard API on http://localhost:8001 ...
+start "Job Agent - API" cmd /k .venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8001
 
 echo Starting scheduler (daily/weekly triggers) ...
 start "Job Agent - Scheduler" cmd /k .venv\Scripts\python.exe scheduler.py
@@ -40,6 +40,6 @@ start "" "frontend\index.html"
 echo.
 echo Job Application Agent is running.
 echo   - API + Scheduler are in the two new console windows -- close them to stop.
-echo   - Dashboard opened in your browser (reads from http://localhost:8000).
+echo   - Dashboard opened in your browser (reads from http://localhost:8001).
 echo.
 endlocal
