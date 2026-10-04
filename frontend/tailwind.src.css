@@ -126,6 +126,18 @@
   .acc-body { @apply hidden border-t border-surface-container px-space-lg pb-space-lg pt-space-md; }
   .acc.is-open .acc-body { @apply block; }
   .acc-add { @apply mt-space-md inline-flex items-center gap-1 text-label-md text-primary hover:underline; }
+  /* reorder arrows sit beside the header button (a button can't hold buttons) */
+  .acc-row { @apply flex items-center; }
+  .acc-row > .acc-head { @apply min-w-0 flex-1; }
+  .acc-move { @apply flex flex-shrink-0 items-center gap-0.5 pr-space-md; }
+  .acc-move-btn { @apply flex h-8 w-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary disabled:pointer-events-none disabled:opacity-25; }
+  .acc-move-btn .ms { font-size: 18px; }
+  .acc { @apply transition-shadow duration-500; }
+  .acc.just-moved { @apply ring-2 ring-primary-fixed-dim; }
+  .acc-remove { @apply mt-space-md inline-flex items-center gap-1 text-label-md text-error hover:underline; }
+  .acc-add-section { @apply flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-outline-variant py-space-md text-label-md text-primary transition-colors hover:border-primary hover:bg-surface-container-low; }
+  .order-note { @apply flex items-start gap-2 rounded-lg border border-secondary-container px-space-md py-space-sm text-body-sm text-on-surface-variant; }
+  .order-reset { @apply inline-flex flex-shrink-0 items-center gap-1 self-center text-label-md text-primary hover:underline; }
 
   /* ---- settings: radio cards bound to a hidden <select> ---- */
   .mode-card, .provider-card { @apply flex flex-col gap-1 rounded-lg bg-surface-container-low p-space-md text-left transition-all hover:bg-surface-container; }

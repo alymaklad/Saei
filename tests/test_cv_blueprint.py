@@ -323,3 +323,65 @@ def test_debug_bench_tailors_from_the_stored_profile(monkeypatch):
     assert rewrite["tailored_cv"].startswith("Aly Maklad")
     assert "Manipal Institute of Technology" in rewrite["tailored_cv"]
     assert any("Kubernetes" in w for w in rewrite["integrity_warnings"])
+
+
+# ---- section order (set on the Profile page) ---------------------------------
+
+def _headers(text: str) -> list[str]:
+    return [line for line in text.split("\n") if line.isupper() and len(line) < 40
+            and line not in ("SUMMARY",) and "|" not in line]
+
+
+def _ordered_document(order):
+    profile = {**PROFILE,
+               "certifications": ["AWS Certified ML — Amazon — 2025"],
+               "custom_sections": [{"id": "pubs", "title": "Publications",
+                                    "bullets": ["Medical VLM paper, MICCAI 2026"]}],
+               "section_order": order}
+    return build_document(profile, RESPONSE, cv_text=CV_TEXT, missing_skills=["Kubernetes"])
+
+
+def test_sections_print_in_the_profile_order():
+    doc = _ordered_document(["skills_claimed", "custom:pubs", "education",
+                             "experience", "projects", "certifications"])
+    assert _headers(cv_render.render_cv_text(doc)) == [
+        "TECHNICAL SKILLS", "PUBLICATIONS", "EDUCATION",
+        "EXPERIENCE", "PROJECTS", "CERTIFICATIONS"]
+
+
+def test_a_document_without_an_order_uses_the_recommended_one(document):
+    assert _headers(cv_render.render_cv_text(document)) == [
+        "EXPERIENCE", "PROJECTS", "EDUCATION", "TECHNICAL SKILLS"]
+
+
+def test_a_partial_order_is_completed():
+    doc = _ordered_document(["education", "bogus"])
+    assert cv_render.section_order(doc) == [
+        "education", "experience", "projects", "skills_claimed",
+        "certifications", "custom:pubs"]
+
+
+def test_recommended_order_matches_the_profile_store():
+    import profile_store
+    assert cv_render.DEFAULT_SECTION_ORDER == profile_store.DEFAULT_SECTION_ORDER
+
+
+def test_custom_section_lines_rescore_as_demonstrated():
+    doc = _ordered_document(["skills_claimed", "custom:pubs", "education",
+                             "experience", "projects", "certifications"])
+    spans = cv_profile.spans_from_text(cv_render.render_cv_text(doc))
+    paper = next(s for s in spans if "MICCAI" in s["text"])
+    assert paper["demonstrated"] and paper["source"] == "custom"
+
+
+def test_pdf_follows_the_profile_order(tmp_path):
+    pdfplumber = pytest.importorskip("pdfplumber")
+    doc = _ordered_document(["education", "custom:pubs", "experience",
+                             "projects", "skills_claimed", "certifications"])
+    out = tmp_path / "ordered.pdf"
+    cv_render.save_cv_as_pdf(doc, str(out))
+    with pdfplumber.open(str(out)) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    positions = [text.index(h) for h in ("EDUCATION", "PUBLICATIONS", "EXPERIENCE",
+                                          "PROJECTS", "TECHNICAL SKILLS", "CERTIFICATIONS")]
+    assert positions == sorted(positions)

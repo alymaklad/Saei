@@ -37,7 +37,7 @@ from models import CvProfile
 # Order matters: this is the order the Profile page renders sections in, and
 # the order changed_sections() reports them in.
 SECTIONS = ("contact", "summary", "experience", "projects", "education",
-            "certifications", "skills_claimed")
+            "certifications", "skills_claimed", "custom_sections", "section_order")
 
 SECTION_LABELS = {
     "contact": "Contact",
@@ -47,7 +47,20 @@ SECTION_LABELS = {
     "education": "Education",
     "certifications": "Certifications",
     "skills_claimed": "Skills",
+    "custom_sections": "Custom sections",
+    "section_order": "Section order",
 }
+
+# The recommended order of the reorderable sections on the Profile page.
+# Contact is not in it: it is the CV header and always stays first. A custom
+# section is referenced as "custom:<id>".
+DEFAULT_SECTION_ORDER = ("experience", "projects", "education",
+                         "skills_claimed", "certifications")
+
+# Neither of these comes out of a CV extraction -- they only exist because the
+# user made them on the Profile page -- so a re-extract carries them over
+# instead of wiping them along with the extracted sections.
+USER_ONLY_SECTIONS = ("custom_sections", "section_order")
 
 # "title" is the headline a CV carries under the name ("AI Engineer",
 # "Senior Backend Developer"). It sits in contact rather than in its own
@@ -67,6 +80,8 @@ def empty_profile() -> dict:
         "certifications": [],
         "skills_claimed": [],
         "seniority_self_described": None,
+        "custom_sections": [],
+        "section_order": list(DEFAULT_SECTION_ORDER),
     }
 
 
@@ -205,6 +220,43 @@ def _clean_education(value) -> list[dict]:
     return out
 
 
+def _clean_custom_sections(value) -> list[dict]:
+    """User-made sections ("Publications", "Volunteering", "Languages"):
+    a title plus one-item-per-line content, stored as bullets so they feed
+    evidence matching the same way a project's description does."""
+    if not isinstance(value, list):
+        return []
+    out, seen_ids = [], set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        title = _clean_str(item.get("title"))
+        bullets = _clean_bullets(item.get("bullets"))
+        if not (title or bullets):
+            continue
+        section_id = _clean_str(item.get("id"))
+        if not section_id or section_id in seen_ids or not all(
+                c.isalnum() or c in "-_" for c in section_id):
+            section_id = hashlib.sha1(f"{title}|{len(out)}".encode("utf-8")).hexdigest()[:10]
+        seen_ids.add(section_id)
+        out.append({"id": section_id, "title": title or "Untitled section",
+                    "bullets": bullets})
+    return out
+
+
+def _clean_section_order(value, custom_sections: list[dict]) -> list[str]:
+    """The user's order, with unknown keys dropped and anything missing
+    (a new built-in section, a custom section not yet placed) appended, so
+    every section always appears exactly once."""
+    valid = list(DEFAULT_SECTION_ORDER) + [f"custom:{c['id']}" for c in custom_sections]
+    order = []
+    for key in value if isinstance(value, list) else []:
+        key = _clean_str(key)
+        if key in valid and key not in order:
+            order.append(key)
+    return order + [k for k in valid if k not in order]
+
+
 def normalize(data) -> dict:
     """Coerce anything profile-shaped into the exact structure the scorer and
     the CV rewriter index into. Never raises."""
@@ -216,6 +268,7 @@ def normalize(data) -> dict:
     contact = {field: _clean_str(raw_contact.get(field)) for field in CONTACT_FIELDS}
 
     seniority = _clean_optional(data.get("seniority_self_described"))
+    custom_sections = _clean_custom_sections(data.get("custom_sections"))
 
     return {
         "contact": contact,
@@ -226,6 +279,8 @@ def normalize(data) -> dict:
         "certifications": _clean_str_list(data.get("certifications")),
         "skills_claimed": _clean_str_list(data.get("skills_claimed")),
         "seniority_self_described": seniority,
+        "custom_sections": custom_sections,
+        "section_order": _clean_section_order(data.get("section_order"), custom_sections),
     }
 
 
@@ -332,7 +387,6 @@ def save_extraction(profile: dict, *, cv_filename: str | None,
     just been replaced -- leaving them set would have the UI warn forever about
     changes that no longer exist.
     """
-    normalized = normalize(profile)
     now = _utcnow()
 
     with get_session() as session:
@@ -340,6 +394,15 @@ def save_extraction(profile: dict, *, cv_filename: str | None,
         if row is None:
             row = CvProfile()
             session.add(row)
+        else:
+            try:
+                previous = json.loads(row.data) if row.data else {}
+            except json.JSONDecodeError:
+                previous = {}
+            if isinstance(previous, dict):
+                profile = {**(profile or {}),
+                           **{k: previous.get(k) for k in USER_ONLY_SECTIONS}}
+        normalized = normalize(profile)
         row.data = json.dumps(normalized, ensure_ascii=False)
         row.source_cv_filename = cv_filename
         row.source_cv_hash = cv_hash(cv_text) if cv_text is not None else None

@@ -3,20 +3,28 @@
 // `state` (loaded first) and never writes to it -- editing stays in profile.js.
 
 (function () {
-  const sections = [...document.querySelectorAll(".acc")];
+  // Queried fresh each time: custom sections are added and removed at runtime.
+  const form = document.getElementById("profile-form");
+  const sections = () => [...form.querySelectorAll(".acc")];
 
   function open(key) {
-    sections.forEach((s) => {
+    sections().forEach((s) => {
       const isOpen = s.dataset.acc === key && !s.classList.contains("is-open");
       s.classList.toggle("is-open", isOpen);
       s.querySelector(".acc-toggle").textContent = isOpen ? "Collapse" : "Expand";
     });
   }
 
-  sections.forEach((s) => {
-    s.querySelector(".acc-toggle").textContent = "Expand";
-    s.querySelector(".acc-head").addEventListener("click", () => open(s.dataset.acc));
+  sections().forEach((s) => { s.querySelector(".acc-toggle").textContent = "Expand"; });
+  form.addEventListener("click", (e) => {
+    const head = e.target.closest(".acc-head");
+    if (head) open(head.closest(".acc").dataset.acc);
   });
+
+  window.openProfileSection = function (key) {
+    const s = sections().find((x) => x.dataset.acc === key);
+    if (s && !s.classList.contains("is-open")) open(key);
+  };
 
   // An "Add entry" button inside a closed section can't be clicked, but one
   // clicked from elsewhere (none today) should still reveal its section.
@@ -70,8 +78,13 @@
         ? first(p.education, (e) => [[e.degree, e.field].filter(Boolean).join(" in "), e.institution].filter(Boolean).join(" · "), 2)
         : "No education yet",
     };
+    (p.custom_sections || []).forEach((c) => {
+      const lines = (c.bullets || []).map((b) => b.trim()).filter(Boolean);
+      sub[`custom:${c.id}`] = lines.length ? first(lines, (x) => x) : "Nothing added yet";
+    });
     Object.entries(sub).forEach(([key, text]) => {
-      const el = document.querySelector(`[data-acc-sub="${key}"]`);
+      const el = document.querySelector(`[data-acc-sub="${key}"]`)
+        || document.querySelector(`.acc[data-acc="${CSS.escape(key)}"] .acc-sub`);
       if (el) el.textContent = text;
     });
   };

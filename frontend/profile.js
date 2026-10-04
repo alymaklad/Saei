@@ -232,13 +232,13 @@ function datePair(entry, { allowPresent }) {
 // quote. Line breaks are how someone keeps those quotes short, and the
 // placeholder says so.
 
-function descriptionField(entry, sectionKey, index) {
+function descriptionField(entry, sectionKey, index, opts = {}) {
   const wrap = el("div", "form-field profile-full-field");
-  wrap.appendChild(el("label", null, { text: "Description" }));
+  wrap.appendChild(el("label", null, { text: opts.label || "Description" }));
 
   const area = el("textarea", null, {
     rows: 4,
-    placeholder: "What you did here. One achievement per line.",
+    placeholder: opts.placeholder || "What you did here. One achievement per line.",
   });
   area.value = (entry.bullets || []).join("\n");
 
@@ -540,6 +540,183 @@ function addSkill(raw) {
   markDirty();
 }
 
+// ---- section order & custom sections ------------------------------------------
+//
+// `section_order` lists every section below About & Contact, which is the CV
+// header and never moves. Built-in sections use their profile key; a custom
+// section is "custom:<id>". profile_store.normalize repairs the list on save
+// (unknown keys dropped, missing ones appended); orderedKeys() does the same
+// here so the page never renders a section twice or loses one.
+
+const RECOMMENDED_ORDER = ["experience", "projects", "education", "skills_claimed", "certifications"];
+
+// The page's data-acc names differ from the profile key in one place.
+const ACC_NAME = { skills_claimed: "skills" };
+const ORDER_KEY = { skills: "skills_claimed" };
+
+function accName(orderKey) { return ACC_NAME[orderKey] || orderKey; }
+
+function sectionEl(orderKey) {
+  return document.querySelector(`#profile-form .acc[data-acc="${CSS.escape(accName(orderKey))}"]`);
+}
+
+function customKeys() {
+  return (state.profile.custom_sections || []).map((c) => `custom:${c.id}`);
+}
+
+function orderedKeys(order) {
+  const valid = [...RECOMMENDED_ORDER, ...customKeys()];
+  const out = (order || []).filter((k, i, all) => valid.includes(k) && all.indexOf(k) === i);
+  return [...out, ...valid.filter((k) => !out.includes(k))];
+}
+
+/** Recommended order, with custom sections after the built-ins in the order the user has them. */
+function recommendedOrder() {
+  const customs = state.profile.section_order.filter((k) => k.startsWith("custom:"));
+  return [...RECOMMENDED_ORDER, ...customs];
+}
+
+function newSectionId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function moveControls() {
+  const box = el("div", "acc-move");
+  [["-1", "arrow_upward", "Move section up"], ["1", "arrow_downward", "Move section down"]]
+    .forEach(([dir, glyph, label]) => {
+      const btn = el("button", "acc-move-btn", { type: "button", "data-move": dir, title: label, "aria-label": label });
+      btn.appendChild(el("span", "ms", { text: glyph }));
+      box.appendChild(btn);
+    });
+  return box;
+}
+
+/** Put the header button and the reorder arrows side by side. */
+function addMoveControls(section) {
+  const head = section.querySelector(":scope > .acc-head");
+  if (!head) return;
+  const row = el("div", "acc-row");
+  section.insertBefore(row, head);
+  row.appendChild(head);
+  row.appendChild(moveControls());
+}
+
+function buildCustomSection(section) {
+  const acc = el("section", "acc", { "data-acc": `custom:${section.id}`, "data-custom": true });
+
+  const head = el("button", "acc-head", { type: "button" });
+  const ic = el("span", "acc-icon");
+  ic.appendChild(el("span", "ms", { text: "article" }));
+  head.appendChild(ic);
+  const text = el("span", "acc-text");
+  const title = el("span", "acc-title");
+  title.appendChild(el("span", "acc-num"));
+  title.appendChild(document.createTextNode(" "));
+  const name = el("span", null, { text: section.title || "Untitled section" });
+  title.appendChild(name);
+  title.appendChild(el("span", "acc-tag", { text: "Custom section" }));
+  text.appendChild(title);
+  text.appendChild(el("span", "acc-sub"));
+  head.appendChild(text);
+  head.appendChild(el("span", "acc-toggle", { text: "Expand" }));
+  acc.appendChild(head);
+  addMoveControls(acc);
+
+  const body = el("div", "acc-body");
+  body.appendChild(boundInput({
+    label: "Section title", value: section.title,
+    placeholder: "e.g. Publications, Volunteering, Languages, Awards",
+    onInput: (v) => { section.title = v; name.textContent = v.trim() || "Untitled section"; },
+  }));
+  body.appendChild(descriptionField(section, "custom", 0, {
+    label: "Content",
+    placeholder: "One item per line — a publication, an award, a language and its level…",
+  }));
+  const remove = el("button", "acc-remove", { type: "button" });
+  remove.appendChild(el("span", "ms text-[18px]", { text: "delete" }));
+  remove.appendChild(document.createTextNode("Remove section"));
+  remove.addEventListener("click", () => {
+    const hasContent = section.title.trim() || (section.bullets || []).some((b) => b.trim());
+    if (hasContent && !confirm(`Remove the “${section.title.trim() || "Untitled"}” section?`)) return;
+    state.profile.custom_sections = state.profile.custom_sections.filter((c) => c !== section);
+    state.profile.section_order = orderedKeys(state.profile.section_order);
+    renderCustomSections();
+    markDirty();
+  });
+  body.appendChild(remove);
+  acc.appendChild(body);
+  return acc;
+}
+
+/** Rebuild the custom sections (structural changes only), then re-sort. */
+function renderCustomSections() {
+  const form = document.getElementById("profile-form");
+  const open = form.querySelector(".acc[data-custom].is-open")?.dataset.acc;
+  form.querySelectorAll(".acc[data-custom]").forEach((node) => node.remove());
+  (state.profile.custom_sections || []).forEach((section) => {
+    const acc = buildCustomSection(section);
+    if (acc.dataset.acc === open) {
+      acc.classList.add("is-open");
+      acc.querySelector(".acc-toggle").textContent = "Collapse";
+    }
+    form.appendChild(acc);
+  });
+  applyOrder();
+}
+
+/** Arrange the sections in `section_order` and refresh numbers, arrows and the note. */
+function applyOrder() {
+  const form = document.getElementById("profile-form");
+  const order = state.profile.section_order;
+  order.forEach((key, i) => {
+    const sec = sectionEl(key);
+    if (!sec) return;
+    form.appendChild(sec);   // About & Contact stays first; appending in order sorts the rest
+    sec.querySelector(".acc-num").textContent = `${i + 2}.`;
+    const [up, down] = sec.querySelectorAll(".acc-move-btn");
+    if (up) up.disabled = i === 0;
+    if (down) down.disabled = i === order.length - 1;
+  });
+
+  document.getElementById("section-count").textContent = `${order.length + 1} sections total`;
+
+  const custom = order.join("|") !== recommendedOrder().join("|");
+  document.getElementById("order-note-lead").textContent =
+    custom ? "Custom order — the recommended one is:" : "Recommended order.";
+  document.getElementById("order-reset").hidden = !custom;
+}
+
+function moveSection(orderKey, delta) {
+  const order = state.profile.section_order;
+  const from = order.indexOf(orderKey);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= order.length) return;
+  [order[from], order[to]] = [order[to], order[from]];
+  applyOrder();
+  markDirty();
+
+  const sec = sectionEl(orderKey);
+  sec.classList.add("just-moved");
+  setTimeout(() => sec.classList.remove("just-moved"), 700);
+  // Moving the node drops focus; keep it on the arrow so repeated presses work.
+  const btn = sec.querySelector(`.acc-move-btn[data-move="${delta}"]`);
+  (btn && !btn.disabled ? btn : sec.querySelector(".acc-move-btn:not(:disabled)"))?.focus();
+  sec.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function addCustomSection() {
+  const section = { id: newSectionId(), title: "", bullets: [""] };
+  state.profile.custom_sections.push(section);
+  state.profile.section_order.push(`custom:${section.id}`);
+  renderCustomSections();
+  markDirty();
+  const key = `custom:${section.id}`;
+  if (typeof window.openProfileSection === "function") window.openProfileSection(key);
+  const sec = sectionEl(key);
+  sec.scrollIntoView({ block: "center", behavior: "smooth" });
+  sec.querySelector(".acc-body input")?.focus({ preventScroll: true });
+}
+
 // ---- contact & summary ------------------------------------------------------
 
 function fillContact() {
@@ -613,12 +790,17 @@ function renderStatus() {
 function applyPayload(payload) {
   state.meta = payload;
   state.profile = payload.profile;
+  // Defaulted before the snapshot, so a profile saved before sections could
+  // be reordered doesn't load already "dirty".
+  state.profile.custom_sections = state.profile.custom_sections || [];
+  state.profile.section_order = orderedKeys(state.profile.section_order);
   state.saved = snapshot(state.profile);
   state.collapsed.clear();
 
   fillContact();
   ["experience", "projects", "education", "certifications"].forEach(renderSection);
   renderSkills();
+  renderCustomSections();
   renderStatus();
   markDirty();
 }
@@ -702,7 +884,23 @@ async function confirmReExtract() {
 // ---- wiring -----------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll('#profile-form .acc:not([data-acc="contact"])').forEach(addMoveControls);
   load();
+
+  document.getElementById("profile-form").addEventListener("click", (e) => {
+    const btn = e.target.closest(".acc-move-btn");
+    if (!btn || !state.profile) return;
+    const name = btn.closest(".acc").dataset.acc;
+    moveSection(ORDER_KEY[name] || name, Number(btn.dataset.move));
+  });
+  document.getElementById("order-reset").addEventListener("click", () => {
+    state.profile.section_order = recommendedOrder();
+    applyOrder();
+    markDirty();
+  });
+  document.getElementById("btn-add-section").addEventListener("click", () => {
+    if (state.profile) addCustomSection();
+  });
 
   document.querySelectorAll("[data-add]").forEach((btn) => {
     btn.addEventListener("click", () => {

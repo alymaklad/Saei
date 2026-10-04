@@ -48,7 +48,7 @@ function paintMaster() {
     <span class="mt-space-sm inline-block rounded bg-surface-container px-2 py-0.5 text-label-sm normal-case tracking-normal text-on-surface-variant">${escapeHtml((status.filename.split(".").pop() || "").toUpperCase())} · extracted into your profile</span>
     ${status.parse_error
       ? `<p class="save-error mt-space-md">Could not read this file: ${escapeHtml(status.parse_error)}</p>`
-      : `<p class="mt-space-md max-w-2xl text-body-md text-on-surface">${escapeHtml(summary.slice(0, 420))}${summary.length > 420 ? "…" : ""}</p>`}
+      : `<p class="mt-space-md text-body-md text-on-surface">${escapeHtml(summary.slice(0, 420))}${summary.length > 420 ? "…" : ""}</p>`}
     ${skills.length ? `
       <p class="mb-space-sm mt-space-lg text-label-sm uppercase tracking-wider text-on-surface-variant">Synthesized competencies</p>
       <div class="flex flex-wrap gap-space-sm">${skills.map((s) => `<span class="rounded bg-surface-container px-2.5 py-1 text-body-md text-on-surface">${escapeHtml(s)}</span>`).join("")}</div>` : ""}

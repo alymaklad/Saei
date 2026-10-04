@@ -810,7 +810,10 @@ def preview_re_extract():
     against.
     """
     stored = profile_store.load()
-    edited = stored["edited_sections"] if stored else []
+    # Custom sections and the section order survive a re-extract
+    # (profile_store.USER_ONLY_SECTIONS), so they are not "overwritten".
+    edited = [s for s in (stored["edited_sections"] if stored else [])
+              if s not in profile_store.USER_ONLY_SECTIONS]
     return {
         "edited_sections": edited,
         "edited_section_labels": [profile_store.SECTION_LABELS[s] for s in edited],

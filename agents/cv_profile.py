@@ -365,6 +365,19 @@ def evidence_spans(profile: dict, cv_text: str = "") -> list[dict]:
                 "entry": str(cert).strip(), "demonstrated": True, "dated": False,
             })
 
+    # Sections the user added on the Profile page (Publications, Volunteering,
+    # ...). Each line is its own span, like a project bullet.
+    for section in profile.get("custom_sections") or []:
+        if not isinstance(section, dict):
+            continue
+        header = str(section.get("title") or "").strip()
+        for bullet in section.get("bullets") or []:
+            if str(bullet).strip():
+                spans.append({
+                    "text": str(bullet).strip(), "source": "custom", "entry": header,
+                    "demonstrated": True, "dated": False,
+                })
+
     for skill in profile.get("skills_claimed") or []:
         if str(skill).strip():
             spans.append({
@@ -518,6 +531,12 @@ _SECTION_PATTERNS = {
     "certification": re.compile(r"^\s*(certifications?|courses?|licen[cs]es?|"
                                 r"awards?)\b", re.IGNORECASE),
     "summary": re.compile(r"^\s*(summary|profile|objective|about)\b", re.IGNORECASE),
+    # Titles people give the sections they add on the Profile page. Anchored
+    # to the whole line, unlike the rest: "Volunteer Teacher | NGO" or
+    # "Languages and Frameworks" must not open a section.
+    "custom": re.compile(r"^\s*(publications?|volunteering|volunteer experience|"
+                         r"languages|honou?rs|extracurricular activities|activities)\s*$",
+                         re.IGNORECASE),
 }
 
 
@@ -604,7 +623,7 @@ def spans_from_text(cv_text: str) -> list[dict]:
             "source": source,
             "entry": "",
             "demonstrated": source in ("experience", "project", "education",
-                                       "certification"),
+                                       "certification", "custom"),
             "dated": bool(_YEAR_IN_LINE.search(line)),
         })
     return _annotate(spans)
@@ -636,6 +655,11 @@ def profile_text(profile: dict) -> str:
         if isinstance(entry, dict):
             parts.append(" ".join(str(entry.get(k) or "")
                                   for k in ("degree", "field", "institution")))
+
+    for section in profile.get("custom_sections") or []:
+        if isinstance(section, dict):
+            parts.append(str(section.get("title") or ""))
+            parts.extend(str(b or "") for b in section.get("bullets") or [])
 
     parts.extend(str(s) for s in profile.get("skills_claimed") or [])
     parts.extend(str(c) for c in profile.get("certifications") or [])

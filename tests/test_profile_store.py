@@ -36,6 +36,7 @@ def test_normalize_fills_every_key_from_junk(store):
         assert set(profile) == {
             "contact", "summary", "experience", "projects", "education",
             "certifications", "skills_claimed", "seniority_self_described",
+            "custom_sections", "section_order",
         }
         assert isinstance(profile["experience"], list)
         assert set(profile["contact"]) == set(store.CONTACT_FIELDS)
@@ -391,3 +392,47 @@ def test_an_unparseable_cv_does_not_break_the_profile_page(client, monkeypatch):
     resp = tc.get("/api/profile")
     assert resp.status_code == 200
     assert resp.json()["cv_changed_since_extraction"] is False
+
+
+# ---- section order & custom sections ------------------------------------------
+
+def test_section_order_defaults_to_the_recommended_order(store):
+    assert store.normalize({})["section_order"] == list(store.DEFAULT_SECTION_ORDER)
+
+
+def test_section_order_keeps_the_users_order_and_repairs_gaps(store):
+    profile = store.normalize({
+        "custom_sections": [{"id": "pubs", "title": "Publications", "bullets": ["A paper"]}],
+        "section_order": ["skills_claimed", "bogus", "custom:pubs", "skills_claimed", "education"],
+    })
+    assert profile["section_order"] == [
+        "skills_claimed", "custom:pubs", "education",
+        "experience", "projects", "certifications",
+    ]
+
+
+def test_blank_custom_sections_are_dropped_and_lines_become_bullets(store):
+    sections = store.normalize({"custom_sections": [
+        {"id": "a", "title": "", "bullets": ["", "  "]},
+        {"id": "b", "title": "Languages", "bullets": "Arabic (native)\n\nEnglish (C1)"},
+    ]})["custom_sections"]
+    assert sections == [{"id": "b", "title": "Languages",
+                         "bullets": ["Arabic (native)", "English (C1)"]}]
+
+
+def test_re_extraction_keeps_custom_sections_and_order(store):
+    store.save_extraction({"summary": "one"}, cv_filename="a.pdf", cv_text="a")
+    store.save({"summary": "one",
+                "custom_sections": [{"id": "pubs", "title": "Publications", "bullets": ["A paper"]}],
+                "section_order": ["custom:pubs", "education"]})
+    profile = store.save_extraction({"summary": "two"}, cv_filename="a.pdf", cv_text="a")["profile"]
+    assert profile["summary"] == "two"
+    assert profile["custom_sections"][0]["title"] == "Publications"
+    assert profile["section_order"][:2] == ["custom:pubs", "education"]
+
+
+def test_custom_section_lines_are_evidence(store):
+    from agents import cv_profile
+    spans = cv_profile.evidence_spans({"custom_sections": [
+        {"id": "p", "title": "Publications", "bullets": ["Paper on medical VLMs"]}]})
+    assert any(s["text"] == "Paper on medical VLMs" and s["demonstrated"] for s in spans)

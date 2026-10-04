@@ -655,6 +655,17 @@ def build_document(profile: dict, response: dict, *, cv_text: str = "",
         "education": education,
         "skills": skills,
         "note": _clean_bullet(response.get("note")),
+        # Printed verbatim from the profile, no model involvement: these are
+        # the user's own words, and the model is never shown them to reword.
+        "certifications": [str(c).strip() for c in profile.get("certifications") or []
+                           if str(c).strip()],
+        "custom_sections": [{
+            "id": str(c.get("id") or ""), "title": str(c.get("title") or "").strip(),
+            "bullets": [str(b).strip() for b in c.get("bullets") or [] if str(b).strip()],
+        } for c in profile.get("custom_sections") or [] if isinstance(c, dict) and c.get("id")],
+        # The order the user set on the Profile page; cv_render.section_order
+        # repairs it and supplies the recommended one when it is missing.
+        "section_order": list(profile.get("section_order") or []),
         "integrity_warnings": warnings,
         # Advice, not an edit: a requirement the CV only names in its skills
         # list can't be moved into a role by a rewrite -- nothing on record

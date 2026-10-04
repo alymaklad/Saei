@@ -47,7 +47,19 @@
 
     <div class="mb-space-md flex items-center justify-between rounded-lg bg-surface-container-low px-space-md py-space-sm">
       <span class="flex items-center gap-2 text-body-sm text-on-surface-variant"><span class="ms text-[18px]">menu_book</span>Focused mode: one section opens at a time.</span>
-      <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">6 modules total</span>
+      <span class="text-label-sm uppercase tracking-wider text-on-surface-variant" id="section-count">6 sections total</span>
+    </div>
+
+    <!-- Section order: any order is allowed, the recommended one is named. -->
+    <div class="order-note mb-space-md" id="order-note">
+      <span class="ms text-[18px] text-secondary">tips_and_updates</span>
+      <p class="min-w-0 flex-1">
+        <strong class="font-semibold text-on-surface" id="order-note-lead">Recommended order.</strong>
+        Experience &rarr; Projects &rarr; Education &rarr; Skills &rarr; Certifications is the order recruiters
+        and ATS parsers expect to read. Tailored CVs print sections in the order set here &mdash; use the arrows on a
+        section to move it; About &amp; Contact always stays first.
+      </p>
+      <button type="button" class="order-reset" id="order-reset" hidden><span class="ms text-[16px]">restart_alt</span>Reset to recommended</button>
     </div>
 
     <form id="profile-form" autocomplete="off" class="flex flex-col gap-space-sm">
@@ -100,7 +112,7 @@
       <section class="acc" data-acc="experience">
         <button type="button" class="acc-head">
           <span class="acc-icon"><span class="ms">work</span></span>
-          <span class="acc-text"><span class="acc-title">2. Experience <span class="acc-tag"><span id="count-experience">0</span> roles</span></span><span class="acc-sub" data-acc-sub="experience"></span></span>
+          <span class="acc-text"><span class="acc-title"><span class="acc-num">2.</span> Experience <span class="acc-tag"><span id="count-experience">0</span> roles</span></span><span class="acc-sub" data-acc-sub="experience"></span></span>
           <span class="acc-toggle"></span>
         </button>
         <div class="acc-body">
@@ -113,7 +125,7 @@
       <section class="acc" data-acc="projects">
         <button type="button" class="acc-head">
           <span class="acc-icon"><span class="ms">terminal</span></span>
-          <span class="acc-text"><span class="acc-title">3. Projects <span class="acc-tag"><span id="count-projects">0</span> featured</span></span><span class="acc-sub" data-acc-sub="projects"></span></span>
+          <span class="acc-text"><span class="acc-title"><span class="acc-num">3.</span> Projects <span class="acc-tag"><span id="count-projects">0</span> featured</span></span><span class="acc-sub" data-acc-sub="projects"></span></span>
           <span class="acc-toggle"></span>
         </button>
         <div class="acc-body">
@@ -126,7 +138,7 @@
       <section class="acc" data-acc="education">
         <button type="button" class="acc-head">
           <span class="acc-icon"><span class="ms">school</span></span>
-          <span class="acc-text"><span class="acc-title">4. Education <span class="acc-tag"><span id="count-education">0</span> entries</span></span><span class="acc-sub" data-acc-sub="education"></span></span>
+          <span class="acc-text"><span class="acc-title"><span class="acc-num">4.</span> Education <span class="acc-tag"><span id="count-education">0</span> entries</span></span><span class="acc-sub" data-acc-sub="education"></span></span>
           <span class="acc-toggle"></span>
         </button>
         <div class="acc-body">
@@ -139,7 +151,7 @@
       <section class="acc" data-acc="skills">
         <button type="button" class="acc-head">
           <span class="acc-icon acc-icon-hot"><span class="ms">psychology</span></span>
-          <span class="acc-text"><span class="acc-title">5. Skills &amp; Competencies <span class="acc-tag acc-tag-hot">Active focus</span></span><span class="acc-sub"><span id="count-skills">0</span> skills cataloged</span></span>
+          <span class="acc-text"><span class="acc-title"><span class="acc-num">5.</span> Skills &amp; Competencies <span class="acc-tag acc-tag-hot">Active focus</span></span><span class="acc-sub"><span id="count-skills">0</span> skills cataloged</span></span>
           <span class="acc-toggle"></span>
         </button>
         <div class="acc-body">
@@ -160,7 +172,7 @@
       <section class="acc" data-acc="certifications">
         <button type="button" class="acc-head">
           <span class="acc-icon"><span class="ms">workspace_premium</span></span>
-          <span class="acc-text"><span class="acc-title">6. Certifications <span class="acc-tag">Optional</span></span><span class="acc-sub"><span id="count-certifications">0</span> added</span></span>
+          <span class="acc-text"><span class="acc-title"><span class="acc-num">6.</span> Certifications <span class="acc-tag">Optional</span></span><span class="acc-sub"><span id="count-certifications">0</span> added</span></span>
           <span class="acc-toggle"></span>
         </button>
         <div class="acc-body">
@@ -181,6 +193,11 @@
         </div>
       </section>
     </form>
+
+    <button type="button" class="acc-add-section mt-space-sm" id="btn-add-section">
+      <span class="ms text-[20px]">add</span>Add a section
+      <span class="font-normal text-on-surface-variant">&mdash; Publications, Volunteering, Languages, Awards&hellip;</span>
+    </button>
 
     <div class="profile-footer mt-space-lg">
       <span class="profile-footer-note flex items-center gap-2">

@@ -284,6 +284,41 @@ def _browsable(url: str) -> str | None:
     return None
 
 
+# ---- section order ------------------------------------------------------------
+#
+# The sections below the summary print in the order the user set on the
+# Profile page, carried on the document as `section_order` (see
+# cv_rewriter_agent.build_document). This is profile_store.DEFAULT_SECTION_ORDER
+# -- duplicated rather than imported so this module stays free of the database
+# layer -- and it is also what a document generated before the order was
+# configurable renders in.
+DEFAULT_SECTION_ORDER = ("experience", "projects", "education",
+                         "skills_claimed", "certifications")
+
+
+def _custom_sections(doc: dict) -> list[dict]:
+    return [c for c in doc.get("custom_sections") or []
+            if isinstance(c, dict) and c.get("id")]
+
+
+def section_order(doc: dict) -> list[str]:
+    """The document's section order, repaired the way profile_store.normalize
+    repairs it: unknown keys dropped, anything missing appended, so every
+    section prints exactly once."""
+    valid = list(DEFAULT_SECTION_ORDER) + [f"custom:{c['id']}" for c in _custom_sections(doc)]
+    order = []
+    for key in doc.get("section_order") or []:
+        key = str(key)
+        if key in valid and key not in order:
+            order.append(key)
+    return order + [k for k in valid if k not in order]
+
+
+def _custom_section(doc: dict, key: str) -> dict | None:
+    wanted = key.partition(":")[2]
+    return next((c for c in _custom_sections(doc) if str(c["id"]) == wanted), None)
+
+
 # ---- plain-text rendering ----------------------------------------------------
 
 def render_cv_text(document) -> str:
@@ -326,42 +361,60 @@ def render_cv_text(document) -> str:
     summary = strip_markup(doc.get("summary")).strip()
     section("SUMMARY", [summary] if summary else [])
 
-    body = []
-    for entry in doc.get("experience") or []:
-        head = " | ".join(p for p in (entry.get("title"), entry.get("organization")) if p)
-        meta = " | ".join(p for p in (format_date_range(entry.get("start"), entry.get("end")),
-                                      entry.get("location")) if p)
-        body.append(" | ".join(p for p in (head, meta) if p))
-        body.extend(f"- {strip_markup(b)}" for b in entry.get("bullets") or [])
-    section("EXPERIENCE", body)
+    def experience():
+        body = []
+        for entry in doc.get("experience") or []:
+            head = " | ".join(p for p in (entry.get("title"), entry.get("organization")) if p)
+            meta = " | ".join(p for p in (format_date_range(entry.get("start"), entry.get("end")),
+                                          entry.get("location")) if p)
+            body.append(" | ".join(p for p in (head, meta) if p))
+            body.extend(f"- {strip_markup(b)}" for b in entry.get("bullets") or [])
+        section("EXPERIENCE", body)
 
-    body = []
-    for entry in doc.get("projects") or []:
-        head = str(entry.get("name") or "")
-        parts = [head]
-        if entry.get("url"):
-            parts.append(str(entry["url"]))
-        dates = format_date_range(entry.get("start"), entry.get("end"))
-        if dates:
-            parts.append(dates)
-        body.append(" | ".join(p for p in parts if p))
-        body.extend(f"- {strip_markup(b)}" for b in entry.get("bullets") or [])
-    if doc.get("note"):
-        body.append(strip_markup(doc["note"]))
-    section("PROJECTS", body)
+    def projects():
+        body = []
+        for entry in doc.get("projects") or []:
+            head = str(entry.get("name") or "")
+            parts = [head]
+            if entry.get("url"):
+                parts.append(str(entry["url"]))
+            dates = format_date_range(entry.get("start"), entry.get("end"))
+            if dates:
+                parts.append(dates)
+            body.append(" | ".join(p for p in parts if p))
+            body.extend(f"- {strip_markup(b)}" for b in entry.get("bullets") or [])
+        if doc.get("note"):
+            body.append(strip_markup(doc["note"]))
+        section("PROJECTS", body)
 
-    body = []
-    for entry in doc.get("education") or []:
-        degree = ", ".join(p for p in (entry.get("degree"), entry.get("field")) if p)
-        head = " | ".join(p for p in (degree, entry.get("institution")) if p)
-        meta = " | ".join(p for p in (format_date_range(entry.get("start"), entry.get("end")),
-                                      entry.get("location")) if p)
-        body.append(" | ".join(p for p in (head, meta) if p))
-    section("EDUCATION", body)
+    def education():
+        body = []
+        for entry in doc.get("education") or []:
+            degree = ", ".join(p for p in (entry.get("degree"), entry.get("field")) if p)
+            head = " | ".join(p for p in (degree, entry.get("institution")) if p)
+            meta = " | ".join(p for p in (format_date_range(entry.get("start"), entry.get("end")),
+                                          entry.get("location")) if p)
+            body.append(" | ".join(p for p in (head, meta) if p))
+        section("EDUCATION", body)
 
-    body = [f"{group.get('category')}: {', '.join(group.get('items') or [])}"
-            for group in doc.get("skills") or [] if group.get("items")]
-    section("TECHNICAL SKILLS", body)
+    def skills():
+        section("TECHNICAL SKILLS",
+                [f"{group.get('category')}: {', '.join(group.get('items') or [])}"
+                 for group in doc.get("skills") or [] if group.get("items")])
+
+    def certifications():
+        section("CERTIFICATIONS",
+                [f"- {strip_markup(c)}" for c in doc.get("certifications") or [] if str(c).strip()])
+
+    builders = {"experience": experience, "projects": projects, "education": education,
+                "skills_claimed": skills, "certifications": certifications}
+    for key in section_order(doc):
+        if key in builders:
+            builders[key]()
+        else:
+            custom = _custom_section(doc, key)
+            section(str(custom.get("title") or "").strip().upper() or "ADDITIONAL",
+                    [f"- {strip_markup(b)}" for b in custom.get("bullets") or [] if str(b).strip()])
 
     return "\n".join(lines).strip()
 
@@ -658,8 +711,10 @@ def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
                 story.append(Paragraph(_inline(text), styles["bullet"], bulletText="\u2022"))
 
     # ---- experience: **Title** | Organization ......... dates | location ----
-    experience = [e for e in doc.get("experience") or [] if isinstance(e, dict)]
-    if experience:
+    def experience_section():
+        experience = [e for e in doc.get("experience") or [] if isinstance(e, dict)]
+        if not experience:
+            return
         section("EXPERIENCE")
         for entry in experience:
             left = " | ".join(p for p in (f"<b>{_inline(clean(entry.get('title')))}</b>"
@@ -671,8 +726,10 @@ def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
             bullets(entry.get("bullets"))
 
     # ---- projects: the whole name in bold, dates only ----
-    projects = [p for p in doc.get("projects") or [] if isinstance(p, dict)]
-    if projects:
+    def projects_section():
+        projects = [p for p in doc.get("projects") or [] if isinstance(p, dict)]
+        if not projects:
+            return
         section("PROJECTS")
         for entry in projects:
             left = f"<b>{_inline(clean(entry.get('name')))}</b>" if entry.get("name") else ""
@@ -686,8 +743,10 @@ def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
             story.append(Paragraph(_inline(note), styles["note"]))
 
     # ---- education: **Degree in Field** | Institution ..... dates | location ----
-    education = [e for e in doc.get("education") or [] if isinstance(e, dict)]
-    if education:
+    def education_section():
+        education = [e for e in doc.get("education") or [] if isinstance(e, dict)]
+        if not education:
+            return
         section("EDUCATION")
         for entry in education:
             degree = " in ".join(p for p in (clean(entry.get("degree")),
@@ -699,15 +758,38 @@ def _document_story(doc: dict, scale: float = 1.0, section_gap: float = 0.0):
             story.append(_entry_row(left, right, styles, width, scale))
 
     # ---- skills: **Category:** items ----
-    groups = [g for g in doc.get("skills") or []
-              if isinstance(g, dict) and g.get("items")]
-    if groups:
+    def skills_section():
+        groups = [g for g in doc.get("skills") or []
+                  if isinstance(g, dict) and g.get("items")]
+        if not groups:
+            return
         section("TECHNICAL SKILLS")
         for group in groups:
             category = clean(group.get("category"))
             items = ", ".join(clean(i) for i in group["items"] if clean(i))
             label = f"<b>{_inline(category)}:</b> " if category else ""
             story.append(Paragraph(f"{label}{_inline(items)}", styles["skills"]))
+
+    # ---- certifications and custom sections: a header over bullets ----
+    def bullet_section(title, items):
+        items = [i for i in items or [] if clean(i)]
+        if not items:
+            return
+        section(title)
+        bullets(items)
+
+    builders = {
+        "experience": experience_section, "projects": projects_section,
+        "education": education_section, "skills_claimed": skills_section,
+        "certifications": lambda: bullet_section("CERTIFICATIONS", doc.get("certifications")),
+    }
+    for key in section_order(doc):
+        if key in builders:
+            builders[key]()
+        else:
+            custom = _custom_section(doc, key)
+            bullet_section(clean(custom.get("title")).upper() or "ADDITIONAL",
+                           custom.get("bullets"))
 
     if not story:
         story.append(Spacer(1, 1))
@@ -751,6 +833,13 @@ def _trim_step(doc: dict) -> bool:
             if len(entry.get("bullets") or []) > floor:
                 entry["bullets"] = entry["bullets"][:floor]
                 return True
+
+    # Sections the user added by hand go last, and never below one line: the
+    # user asked for them by name, so an emptied one would be a silent drop.
+    for custom in reversed(_custom_sections(doc)):
+        if len(custom.get("bullets") or []) > 1:
+            custom["bullets"] = custom["bullets"][:-1]
+            return True
 
     return False
 
