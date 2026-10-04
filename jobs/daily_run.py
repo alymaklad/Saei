@@ -9,13 +9,16 @@ Retrieval is recall-biased and cheap; ranking is the expensive, precise pass,
 and it runs only on jobs that are both new and made it through retrieval.
 """
 import json
-from datetime import datetime, timezone
+import re
+import threading
+import time
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 
 import config
 from db import get_session, init_db
-from models import Job, Application, SkillGap
+from models import Job, Application, SkillGap, PendingJob
 from agents.search_agent import run_search
 from orchestrator import app as orchestrator_app
 from cv_parser import parse_cv, find_default_cv
@@ -287,7 +290,219 @@ def _process_one_job(raw_job: dict, cv_text: str) -> dict | None:
     )
 
 
-def run_daily_search_and_apply(
+# ---- jobs the LLM cut short ---------------------------------------------------
+#
+# A job whose processing fails because the LLM's usage limit is spent (or its
+# answer couldn't be read) isn't the job's fault, and the search may not return
+# that posting again tomorrow -- LinkedIn only reads its first page, freshness
+# filters age it out. So it's kept in pending_jobs and the next run processes
+# it first, straight at the orchestrator, before anything new.
+
+# ---- stopping a run -----------------------------------------------------------
+#
+# The dashboard's Stop button sets this; a run checks it between sources,
+# between stages and between jobs, so it ends after the step in progress. Jobs
+# already ranked but not yet processed go to pending_jobs ("stopped") and the
+# next run starts with them. Process-local: it stops a run started from this
+# API process, not the scheduler's separate one.
+_stop_requested = threading.Event()
+_running = threading.Event()
+
+
+def request_stop() -> bool:
+    """Asks the run in progress to stop. False when nothing is running."""
+    if not _running.is_set():
+        return False
+    _stop_requested.set()
+    return True
+
+
+def is_running() -> bool:
+    return _running.is_set()
+
+
+PENDING_MAX_AGE_DAYS = 14       # postings older than this have likely closed
+PENDING_MAX_ATTEMPTS = 3        # unreadable answers: give up after this many
+SHORT_WAIT_MAX_SECONDS = 90     # a per-minute limit this close to resetting is waited out
+
+_LIMIT_RE = re.compile(
+    r"rate.?limit|rate_limit_exceeded|\b429\b|tokens per (minute|day)|\bTP[MD]\b|"
+    r"quota|token budget is spent|too many requests", re.I)
+_DAILY_RE = re.compile(r"per day|\bTPD\b|daily", re.I)
+_UNREADABLE_RE = re.compile(r"not the requested JSON|returned no requirements", re.I)
+_SIZES_RE = re.compile(r"Limit (\d+),(?: Used \d+,)? Requested (\d+)")
+_NEEDED_RE = re.compile(r"needed (\d+) tokens against a (\d+)-token limit")
+_RETRY_IN_RE = re.compile(r"try again in (?:(\d+)m)?\s*([\d.]+)s", re.I)
+
+
+def _failure_kind(error: str) -> str | None:
+    """"limit" (usage limit spent), "unreadable" (the model's answer couldn't
+    be used), or None for an ordinary failure."""
+    if _LIMIT_RE.search(error):
+        # One request bigger than the whole window ("Limit 8000, Requested
+        # 15262") fails the same way every time -- no amount of waiting fits
+        # it, so it's an ordinary failure, not a reason to keep the job.
+        sizes = _SIZES_RE.search(error)
+        if sizes and int(sizes.group(2)) > int(sizes.group(1)):
+            return None
+        needed = _NEEDED_RE.search(error)  # agents.llm.describe_llm_error's wording
+        if needed and int(needed.group(1)) > int(needed.group(2)):
+            return None
+        return "limit"
+    if _UNREADABLE_RE.search(error):
+        return "unreadable"
+    return None
+
+
+def _short_wait(error: str) -> float | None:
+    """Seconds to wait out a per-minute limit that resets soon, or None when
+    the limit is daily or the provider's suggested wait is too long."""
+    if _failure_kind(error) != "limit" or _DAILY_RE.search(error):
+        return None
+    match = _RETRY_IN_RE.search(error)
+    if not match:
+        return None
+    seconds = int(match.group(1) or 0) * 60 + float(match.group(2))
+    return seconds + 1 if seconds <= SHORT_WAIT_MAX_SECONDS else None
+
+
+def _load_pending() -> list[dict]:
+    """The waiting jobs, oldest first. Expired ones are dropped on the way."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=PENDING_MAX_AGE_DAYS)
+    jobs = []
+    with get_session() as session:
+        for row in session.query(PendingJob).order_by(PendingJob.date_added).all():
+            added = row.date_added
+            if added is not None and added.tzinfo is None:
+                added = added.replace(tzinfo=timezone.utc)
+            if added is not None and added < cutoff:
+                session.delete(row)
+                continue
+            try:
+                jobs.append(json.loads(row.payload))
+            except (TypeError, ValueError):
+                session.delete(row)
+    return jobs
+
+
+def _save_pending(job: dict, reason: str, error: str) -> int:
+    """Adds or updates a waiting job; returns its count of own-fault attempts
+    (usage limits and stopped runs don't count -- they say nothing about the
+    job)."""
+    url = _job_url(job)
+    with get_session() as session:
+        row = session.query(PendingJob).filter(PendingJob.url == url).first()
+        if row is None:
+            row = PendingJob(url=url, attempts=0)
+            session.add(row)
+        row.title = job.get("title", "")
+        row.company = job.get("company") or job.get("watchlist_company", "")
+        row.payload = json.dumps(job, default=str)
+        row.reason = reason
+        row.last_error = error
+        row.date_updated = datetime.now(timezone.utc)
+        if reason == "unreadable":
+            row.attempts = (row.attempts or 0) + 1
+        return row.attempts
+
+
+def _clear_pending(url: str) -> None:
+    with get_session() as session:
+        session.query(PendingJob).filter(PendingJob.url == url).delete()
+
+
+def pending_summary() -> dict:
+    """How many jobs are waiting, for the Search page."""
+    with get_session() as session:
+        rows = session.query(PendingJob.reason).all()
+    return {"count": len(rows), "limit": sum(1 for r in rows if r[0] == "limit")}
+
+
+def _process_with_short_wait(job: dict, cv_text: str) -> dict | None:
+    """_process_one_job, retried once after a per-minute limit that's about to
+    reset. It pops ranking keys off the dict it's given, so each try gets a
+    fresh copy."""
+    try:
+        return _process_one_job(dict(job), cv_text)
+    except Exception as exc:  # noqa: BLE001
+        wait = _short_wait(str(exc))
+        if wait is None:
+            raise
+        print(f"[orchestrator] per-minute LLM limit reached, waiting {wait:.0f}s before retrying")
+        time.sleep(wait)
+        return _process_one_job(dict(job), cv_text)
+
+
+def _process_batch(passing: list[dict], cv_text: str, trace) -> dict:
+    """Runs the orchestrator over the waiting jobs from earlier runs, then
+    today's ranked jobs. Jobs the LLM cuts short are set aside in
+    pending_jobs instead of failing (see the section above)."""
+    processed = []
+    errors = []
+    queued = []      # left for the next run (LLM limit / unreadable answer)
+    resumed = 0      # waiting jobs from an earlier run that finished this time
+
+    # Jobs an earlier run couldn't finish go first, ahead of anything new. A
+    # fresh copy of the same posting from today's search is skipped in favour
+    # of the waiting one, which already carries its match score.
+    pending = _load_pending()
+    pending_urls = {_job_url(j) for j in pending}
+    work = [(j, True) for j in pending] + [
+        (j, False) for j in passing if _job_url(j) not in pending_urls]
+
+    # Once the usage limit is spent, every further call would fail the same
+    # way -- the rest of the batch is set aside without calling the model.
+    limit_error = None
+
+    def _queue(job, reason, error):
+        attempts = _save_pending(job, reason, error)
+        if reason == "unreadable" and attempts >= PENDING_MAX_ATTEMPTS:
+            _clear_pending(_job_url(job))
+            return False
+        queued.append({"title": job.get("title", ""), "company": job.get("company", ""),
+                       "url": _job_url(job), "reason": reason})
+        return True
+
+    with trace.stage("orchestrator (per job)"):
+        for raw_job, from_queue in work:
+            url = _job_url(raw_job)
+            if not url:
+                continue
+            if _stop_requested.is_set():
+                # A waiting job simply stays where it is; a new one joins it.
+                if not from_queue:
+                    _queue(raw_job, "stopped", "The search was stopped before this job was processed.")
+                continue
+            if limit_error:
+                _queue(raw_job, "limit", limit_error)
+                continue
+            # Snapshot before processing: _process_one_job strips the ranking
+            # keys off the dict, and a queued job needs them to resume.
+            snapshot = dict(raw_job)
+            try:
+                outcome = _process_with_short_wait(snapshot, cv_text)
+                if outcome is not None:  # None -- already existed, nothing new to record
+                    processed.append(outcome)
+                    resumed += from_queue
+                if from_queue:
+                    _clear_pending(url)
+            except Exception as exc:  # noqa: BLE001 -- one bad job shouldn't sink the batch
+                message = str(exc)
+                kind = _failure_kind(message)
+                trace.record_error("orchestrator", url, exc)
+                if kind == "limit":
+                    limit_error = message
+                    _queue(snapshot, "limit", message)
+                elif kind == "unreadable" and _queue(snapshot, "unreadable", message):
+                    pass
+                else:
+                    if from_queue:
+                        _clear_pending(url)
+                    errors.append({"title": raw_job.get("title", ""), "url": url, "error": message})
+    return {"processed": processed, "errors": errors, "queued": queued,
+            "resumed": resumed, "limit_error": limit_error}
+
+def _run_daily_search_and_apply(
     cv_path: str | None = None,
     position: str | None = None,
     seniority: str | None = None,
@@ -387,6 +602,7 @@ def run_daily_search_and_apply(
             # own title filter would already have discarded every job it
             # exists to recover.
             include_title_mismatches=True,
+            should_stop=_stop_requested.is_set,
         )
 
     # ---- Stage 3: drop jobs already in the DB ------------------------------
@@ -401,8 +617,13 @@ def run_daily_search_and_apply(
                 trace.record_retrieval(job, "token", "dropped", "already in the Jobs database")
 
     # ---- Stage 4: semantic retrieval + ranking -----------------------------
-    ranked = _rank_candidates(new_jobs, cv_text, target_roles, seniority, trace=trace,
-                              profile=profile)
+    # Skipped once the run is stopped: unranked jobs aren't kept (the next
+    # search simply finds them again), so ranking them would be wasted calls.
+    if _stop_requested.is_set():
+        ranked = []
+    else:
+        ranked = _rank_candidates(new_jobs, cv_text, target_roles, seniority, trace=trace,
+                                  profile=profile)
 
     # ---- Stage 5: match-score gate -----------------------------------------
     # Off by default (MATCH_SCORE_THRESHOLD=0.0). Jobs held back here are
@@ -447,25 +668,9 @@ def run_daily_search_and_apply(
             "would_process": len(passing),
         }
 
-    processed = []
-    errors = []
-
-    with trace.stage("orchestrator (per job)"):
-        for raw_job in passing:
-            url = raw_job.get("url") or raw_job.get("hostedUrl") or raw_job.get("absolute_url")
-            if not url:
-                continue
-            try:
-                outcome = _process_one_job(raw_job, cv_text)
-                if outcome is not None:  # None -- already existed, nothing new to record
-                    processed.append(outcome)
-            except Exception as exc:  # noqa: BLE001 -- one bad job shouldn't sink the batch
-                errors.append({
-                    "title": raw_job.get("title", ""),
-                    "url": url,
-                    "error": str(exc),
-                })
-                trace.record_error("orchestrator", url, exc)
+    batch = _process_batch(passing, cv_text, trace)
+    processed, errors = batch["processed"], batch["errors"]
+    queued, resumed, limit_error = batch["queued"], batch["resumed"], batch["limit_error"]
 
     for err in source_errors:
         trace.record_error(err.get("source", ""), err.get("identifier"), err.get("error", ""))
@@ -477,6 +682,10 @@ def run_daily_search_and_apply(
     return {
         "processed": processed,
         "errors": errors,
+        "queued": queued,
+        "resumed": resumed,
+        "limit_error": limit_error,
+        "stopped": _stop_requested.is_set(),
         "found": len(found),
         "source_errors": source_errors,
         "target_roles": target_roles,
@@ -487,6 +696,18 @@ def run_daily_search_and_apply(
     }
 
 
+def run_daily_search_and_apply(*args, **kwargs) -> dict:
+    """The search-and-apply run (see _run_daily_search_and_apply), marked as
+    running for its duration so the dashboard's Stop button can reach it."""
+    _stop_requested.clear()
+    _running.set()
+    try:
+        return _run_daily_search_and_apply(*args, **kwargs)
+    finally:
+        _running.clear()
+        _stop_requested.clear()
+
+
 if __name__ == "__main__":
     outcome = run_daily_search_and_apply()
     if outcome.get("target_roles"):
@@ -495,6 +716,8 @@ if __name__ == "__main__":
         print(r)
     for e in outcome["errors"]:
         print("ERROR:", e)
+    for q in outcome.get("queued", []):
+        print(f"LEFT FOR NEXT RUN ({q['reason']}):", q["title"], q["url"])
     for e in outcome["source_errors"]:
         print("SOURCE UNREACHABLE:", e)
     print(f"{outcome['found']} found, {outcome['new_after_dedup']} new, "

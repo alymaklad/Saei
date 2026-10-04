@@ -24,9 +24,9 @@ import cv_parser
 import env_store
 import profile_store
 from agents import email_agent
-from agents.search_agent import parse_site_url, SENIORITY_LABELS
+from agents.search_agent import BUILTIN_FEEDS, parse_site_url, SENIORITY_LABELS
 from db import get_session, init_db
-from jobs.daily_run import run_daily_search_and_apply
+from jobs.daily_run import pending_summary, request_stop, run_daily_search_and_apply
 from models import (
     Job, Application, SkillGap, NewsDigest, EmailLog, ReportLog, SearchSite,
     QueryExpansionCache, CvProfile,
@@ -1084,6 +1084,95 @@ def delete_search_site(site_id: int):
     return {"status": "deleted"}
 
 
+# Sources that don't live in the search_sites table: the always-on feeds, the
+# company boards listed in .env, LinkedIn's locations and Google Jobs. The
+# Search page lists them next to the table's rows so every source a search
+# actually queries is visible there.
+ENV_BOARD_LISTS = {
+    "GREENHOUSE_BOARD_TOKENS": ("Greenhouse", "https://job-boards.greenhouse.io/{}"),
+    "LEVER_COMPANY_SLUGS": ("Lever", "https://jobs.lever.co/{}"),
+    "ASHBY_BOARD_SLUGS": ("Ashby", "https://jobs.ashbyhq.com/{}"),
+    "SMARTRECRUITERS_COMPANIES": ("SmartRecruiters", "https://jobs.smartrecruiters.com/{}"),
+}
+
+
+@app.get("/api/search/builtin-sources")
+def list_builtin_sources():
+    feeds = [
+        {"key": key, "label": meta["label"], "url": meta["url"],
+         "enabled": key not in config.SEARCH_DISABLED_FEEDS}
+        for key, meta in BUILTIN_FEEDS.items()
+    ]
+    boards = [
+        {"env_key": env_key, "value": value, "kind": kind, "url": url.format(value),
+         "label": value.replace("-", " ").title() if value.islower() else value}
+        for env_key, (kind, url) in ENV_BOARD_LISTS.items()
+        for value in getattr(config, env_key)
+    ]
+    return {
+        "feeds": feeds,
+        "boards": boards,
+        "linkedin": list(config.LINKEDIN_LOCATIONS),
+        "google_jobs": bool(config.SERPAPI_KEY),
+    }
+
+
+class FeedToggle(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/search/builtin-sources/feeds/{key}")
+def toggle_builtin_feed(key: str, body: FeedToggle):
+    if key not in BUILTIN_FEEDS:
+        raise HTTPException(404, "Unknown feed.")
+    disabled = set(config.SEARCH_DISABLED_FEEDS)
+    (disabled.discard if body.enabled else disabled.add)(key)
+    env_store.update_env_file({"SEARCH_DISABLED_FEEDS": ",".join(sorted(disabled)) or None})
+    config.SEARCH_DISABLED_FEEDS = disabled
+    return {"key": key, "enabled": body.enabled}
+
+
+class EnvListItem(BaseModel):
+    env_key: str
+    value: str
+
+
+def _remove_from_env_list(env_key: str, value: str) -> list[str]:
+    current = list(getattr(config, env_key))
+    if value not in current:
+        raise HTTPException(404, "That source isn't in the list.")
+    current.remove(value)
+    env_store.update_env_file({env_key: ",".join(current)})
+    setattr(config, env_key, current)
+    return current
+
+
+@app.post("/api/search/builtin-sources/remove-board")
+def remove_env_board(body: EnvListItem):
+    if body.env_key not in ENV_BOARD_LISTS:
+        raise HTTPException(400, "Unknown board list.")
+    return {"remaining": _remove_from_env_list(body.env_key, body.value)}
+
+
+@app.post("/api/search/builtin-sources/add-linkedin")
+def add_linkedin_location(body: EnvListItem):
+    value = body.value.strip().replace(",", " ")
+    if not value:
+        raise HTTPException(400, "Location is required.")
+    current = list(config.LINKEDIN_LOCATIONS)
+    if value.lower() in (v.lower() for v in current):
+        raise HTTPException(400, "That location is already searched.")
+    current.append(value)
+    env_store.update_env_file({"LINKEDIN_LOCATIONS": ",".join(current)})
+    config.LINKEDIN_LOCATIONS = current
+    return {"locations": current}
+
+
+@app.post("/api/search/builtin-sources/remove-linkedin")
+def remove_linkedin_location(body: EnvListItem):
+    return {"remaining": _remove_from_env_list("LINKEDIN_LOCATIONS", body.value)}
+
+
 class SearchConfigUpdate(BaseModel):
     position_query: str
     seniority_level: str = ""
@@ -1127,6 +1216,20 @@ def update_search_config(body: SearchConfigUpdate):
         os.environ[key] = value
     importlib.reload(config)
     return _search_config_payload()
+
+
+@app.get("/api/search/pending")
+def search_pending():
+    """Jobs an earlier run couldn't finish (LLM usage limit, unreadable
+    answer). The next run processes them first."""
+    return pending_summary()
+
+
+@app.post("/api/search/stop")
+def stop_search():
+    """Asks the running search to stop after the step in progress. Jobs found
+    but not yet processed are kept for the next run."""
+    return {"stopping": request_stop()}
 
 
 @app.post("/api/search/run")

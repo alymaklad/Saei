@@ -72,6 +72,26 @@ class SkillGap(Base):
     date_created = Column(DateTime, default=_utcnow)
 
 
+class PendingJob(Base):
+    """A found job whose processing the LLM cut short -- its usage limit was
+    spent, or its answer couldn't be read -- kept so the next run finishes it
+    even if the search no longer returns that posting. Holds the job exactly as
+    the ranking stage handed it over (match score included), so it resumes at
+    the orchestrator without being searched or ranked again. No Job row exists
+    for it meanwhile: that's written only once processing succeeds."""
+    __tablename__ = "pending_jobs"
+    id = Column(Integer, primary_key=True)
+    url = Column(String, unique=True, nullable=False)
+    title = Column(String)
+    company = Column(String)
+    payload = Column(Text)                # JSON: the ranked job dict
+    reason = Column(String)               # "limit" | "unreadable"
+    attempts = Column(Integer, default=0)  # failed tries that were the job's own fault
+    last_error = Column(Text)
+    date_added = Column(DateTime, default=_utcnow)
+    date_updated = Column(DateTime, default=_utcnow)
+
+
 class NewsDigest(Base):
     __tablename__ = "news_digests"
     id = Column(Integer, primary_key=True)

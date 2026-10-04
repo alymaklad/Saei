@@ -401,6 +401,22 @@ LINKEDIN_MAX_JOBS = 25  # descriptions fetched per run -- each one is a paced re
 _WORLDWIDE_RE = re.compile(r"\b(worldwide|anywhere|global|international)\b", re.I)
 
 
+# The query-independent feeds every search runs, for the Search page's source
+# list. Each can be switched off there (config.SEARCH_DISABLED_FEEDS).
+BUILTIN_FEEDS = {
+    "remoteok": {"label": "RemoteOK", "url": "https://remoteok.com/"},
+    "weworkremotely": {"label": "We Work Remotely", "url": "https://weworkremotely.com/"},
+    "himalayas": {"label": "Himalayas", "url": "https://himalayas.app/jobs"},
+    "remotive": {"label": "Remotive", "url": "https://remotive.com/"},
+    "jobicy": {"label": "Jobicy", "url": "https://jobicy.com/"},
+    "workingnomads": {"label": "Working Nomads", "url": "https://www.workingnomads.com/jobs"},
+}
+
+
+def _feed_on(key: str) -> bool:
+    return key not in config.SEARCH_DISABLED_FEEDS
+
+
 def _html_text(html: str | None) -> str:
     from bs4 import BeautifulSoup
     return BeautifulSoup(html or "", "html.parser").get_text("\n", strip=True)
@@ -625,19 +641,22 @@ def enrich_smartrecruiters(job: dict) -> dict | None:
 
 
 def search_linkedin(target_roles: list[str] | None = None, locations: list[str] | None = None,
-                    max_age_days: int | None = None) -> list[dict]:
+                    max_age_days: int | None = None, should_stop=None) -> list[dict]:
     """LinkedIn's logged-out job search -- the endpoint its own public jobs
     page calls -- once per role phrase per location (first page, 10 cards).
     "Worldwide" is searched as remote-only. Cards carry no description; that
     is fetched by enrich_linkedin() for the few that survive the title
     filter. A 429 ends the sweep early with whatever was already collected
-    rather than failing the source."""
+    rather than failing the source. `should_stop` (a no-arg callable) ends the
+    sweep early the same way, for a search the user stopped."""
     from bs4 import BeautifulSoup
     phrases = _phrases(target_roles)
     locations = [l for l in (locations or []) if l.strip()]
     jobs, seen, first = [], set(), True
     for phrase in phrases:
         for location in locations:
+            if should_stop and should_stop():
+                return jobs
             if not first:
                 time.sleep(config.LINKEDIN_REQUEST_DELAY)
             first = False
@@ -1013,6 +1032,7 @@ def run_search(
     target_roles: list[str] | None = None,
     trace=None,
     include_title_mismatches: bool = False,
+    should_stop=None,
 ) -> tuple[list[dict], list[dict]]:
     """
     Pulls from every configured free source and tags each job with its source.
@@ -1067,6 +1087,10 @@ def run_search(
     exists to recover. Seniority mismatches are still dropped outright, since
     seniority remains a hard filter.
 
+    `should_stop` is an optional no-arg callable; once it returns True (the
+    user pressed Stop) no further source is queried and whatever was already
+    collected is returned.
+
     `trace` is an optional agents.search_trace.SearchTrace that records what
     each source returned before and after each filter, for the Excel debug
     report. Purely observational -- it never changes what this function does,
@@ -1080,6 +1104,7 @@ def run_search(
     if trace is None:
         from agents.search_trace import NullTrace
         trace = NullTrace()
+    stopped = should_stop or (lambda: False)
 
     # Default keeps every pre-expansion caller working identically.
     if target_roles is None:
@@ -1111,6 +1136,8 @@ def run_search(
         offered to the semantic retriever -- with no description there is
         nothing for it to judge. `limit` tightens the per-site cap for them.
         """
+        if stopped():
+            return []
         started = time.perf_counter()
         try:
             raw = fetch()
@@ -1129,6 +1156,8 @@ def run_search(
         if enrich:
             enriched = []
             for job in capped:
+                if stopped():
+                    break
                 try:
                     full = enrich(job)
                 except requests.RequestException as exc:
@@ -1182,18 +1211,24 @@ def run_search(
     # search_remoteok takes no query param of its own here: it's filtered by
     # the same _filter_relevant title pass as every other Role 2 source, so
     # the expanded phrase list applies to it uniformly.
-    broad += _collect("remoteok", None, search_remoteok, {"source": "remoteok"})
-    broad += _collect("weworkremotely", None, search_weworkremotely, {"source": "weworkremotely"})
+    if _feed_on("remoteok"):
+        broad += _collect("remoteok", None, search_remoteok, {"source": "remoteok"})
+    if _feed_on("weworkremotely"):
+        broad += _collect("weworkremotely", None, search_weworkremotely, {"source": "weworkremotely"})
 
     # Keyless remote boards. Himalayas and Remotive search server-side, once
     # per role phrase (merged and deduped inside the fetcher, so the per-site
     # cap covers the combined set); Jobicy and Working Nomads are whole feeds
     # filtered by title like RemoteOK. All four drop jobs the candidate can't
     # apply to (config.SEARCH_ELIGIBLE_LOCATIONS).
-    broad += _collect("himalayas", None, lambda: search_himalayas(target_roles), {"source": "himalayas"})
-    broad += _collect("remotive", None, lambda: search_remotive(target_roles), {"source": "remotive"})
-    broad += _collect("jobicy", None, search_jobicy, {"source": "jobicy"})
-    broad += _collect("workingnomads", None, search_workingnomads, {"source": "workingnomads"})
+    if _feed_on("himalayas"):
+        broad += _collect("himalayas", None, lambda: search_himalayas(target_roles), {"source": "himalayas"})
+    if _feed_on("remotive"):
+        broad += _collect("remotive", None, lambda: search_remotive(target_roles), {"source": "remotive"})
+    if _feed_on("jobicy"):
+        broad += _collect("jobicy", None, search_jobicy, {"source": "jobicy"})
+    if _feed_on("workingnomads"):
+        broad += _collect("workingnomads", None, search_workingnomads, {"source": "workingnomads"})
 
     for slug in config.ASHBY_BOARD_SLUGS:
         broad += _collect("ashby", slug, lambda s=slug: search_ashby(s),
@@ -1207,7 +1242,8 @@ def run_search(
 
     if config.LINKEDIN_LOCATIONS and target_roles:
         broad += _collect("linkedin", ", ".join(config.LINKEDIN_LOCATIONS),
-                          lambda: search_linkedin(target_roles, config.LINKEDIN_LOCATIONS, max_age_days),
+                          lambda: search_linkedin(target_roles, config.LINKEDIN_LOCATIONS, max_age_days,
+                                                  should_stop=stopped),
                           {"source": "linkedin"},
                           enrich=enrich_linkedin, limit=LINKEDIN_MAX_JOBS)
 
@@ -1231,6 +1267,8 @@ def run_search(
     # ---- Dashboard-added sites: Role 2 for Greenhouse/Lever, Role 1 for the rest ----
 
     for site in get_configured_sites():
+        if stopped():
+            break
         site_started = time.perf_counter()
         try:
             if site["site_type"] == "greenhouse":
@@ -1261,6 +1299,8 @@ def run_search(
                 # results are merged, deduped, and capped as one set.
                 per_site = []
                 for role in target_roles:
+                    if stopped():
+                        break
                     built_url = KNOWN_JOB_BOARD_TEMPLATES[site["site_type"]]["build_url"](role)
                     if built_url:
                         found_for_role = search_generic_site(built_url, position=role)
@@ -1277,6 +1317,8 @@ def run_search(
                 # its own link-narrowing is what `position` drives there.
                 per_site = []
                 for role in target_roles:
+                    if stopped():
+                        break
                     found_for_role = search_generic_site(site["url"], position=role)
                     per_site += found_for_role
                     trace.record_source("generic", site["url"], role_phrase=role,
@@ -1310,6 +1352,8 @@ def run_search(
     serp_roles = target_roles[: max(0, config.SERPAPI_EXPANSION_LIMIT)] if target_roles else []
     seniority_label = SENIORITY_LABELS.get(seniority, "")
     for role in serp_roles:
+        if stopped():
+            break
         serp_query = " ".join(part for part in (seniority_label, role) if part).strip()
         if not serp_query:
             continue

@@ -84,14 +84,32 @@
 
       <!-- Source management (from the old Job Boards panel) -->
       <div class="mt-space-md border-t border-surface-container pt-space-md" id="sources-panel" hidden>
-        <div class="mb-space-sm flex items-center justify-between">
+        <div class="mb-space-sm flex items-center justify-between gap-space-md">
+          <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Always-on feeds</span>
+          <span class="text-body-sm text-on-surface-variant">Keyless remote-job APIs, queried on every search. Switch off any you don't want.</span>
+        </div>
+        <div class="grid grid-cols-3 gap-space-sm" id="feeds-body"></div>
+
+        <div class="mb-space-sm mt-space-lg flex items-center justify-between gap-space-md">
+          <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">LinkedIn &amp; Google Jobs</span>
+          <span class="text-body-sm text-on-surface-variant">LinkedIn searches each location once per role phrase. <b class="font-semibold">Worldwide</b> means remote only.</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-space-sm" id="linkedin-body"></div>
+
+        <div class="mb-space-sm mt-space-lg flex items-center justify-between gap-space-md">
+          <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Company boards</span>
+          <span class="text-body-sm text-on-surface-variant">Read through each company's public hiring-system API (Greenhouse, Lever, Ashby, SmartRecruiters).</span>
+        </div>
+        <div class="grid grid-cols-3 gap-space-sm" id="boards-body"></div>
+
+        <div class="mb-space-sm mt-space-lg flex items-center justify-between gap-space-md">
           <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Job boards &amp; career pages</span>
-          <span class="text-body-sm text-on-surface-variant">Greenhouse/Lever links use their public APIs; anything else is scraped best-effort.</span>
+          <span class="text-body-sm text-on-surface-variant">Scraped best-effort, once per role phrase.</span>
         </div>
         <div class="grid grid-cols-3 gap-space-sm" id="sites-body"></div>
         <form id="add-site-form" class="mt-space-sm flex gap-space-sm">
           <label for="site-url-input" class="sr-only">Website URL</label>
-          <input type="text" id="site-url-input" class="sa-input flex-1" placeholder="https://boards.greenhouse.io/acme or any careers page">
+          <input type="text" id="site-url-input" class="sa-input flex-1" placeholder="A Greenhouse, Lever, Ashby or SmartRecruiters board URL, or any careers page">
           <button type="submit" class="sa-btn"><span class="ms text-[18px]">add_link</span>Add source</button>
         </form>
         <span id="site-message" class="save-message mt-2 block"></span>
@@ -110,9 +128,14 @@
               <p class="text-body-sm text-on-surface-variant">Each new job is matched against your profile before it reaches you.</p>
             </div>
           </div>
-          <span class="flex items-center gap-1.5 rounded-full bg-surface-container-lowest px-3 py-1 text-label-sm normal-case tracking-normal text-on-surface-variant" id="run-chip">
-            <span class="h-1.5 w-1.5 rounded-full bg-tertiary"></span>Running
-          </span>
+          <div class="flex items-center gap-space-sm">
+            <span class="flex items-center gap-1.5 rounded-full bg-surface-container-lowest px-3 py-1 text-label-sm normal-case tracking-normal text-on-surface-variant" id="run-chip">
+              <span class="h-1.5 w-1.5 rounded-full bg-tertiary"></span>Running
+            </span>
+            <button type="button" id="stop-btn" class="sa-btn hidden py-1.5">
+              <span class="ms text-[18px]">stop_circle</span><span id="stop-label">Stop search</span>
+            </button>
+          </div>
         </div>
         <div class="mb-space-lg h-1.5 overflow-hidden rounded-full bg-surface-container-highest">
           <div class="h-full rounded-full bg-gradient-to-r from-tertiary-fixed-dim to-primary transition-all duration-700" id="run-bar" style="width: 0%"></div>

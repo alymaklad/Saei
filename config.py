@@ -177,6 +177,10 @@ LINKEDIN_REQUEST_DELAY = _float("LINKEDIN_REQUEST_DELAY", 2.0)
 # everything.
 SEARCH_ELIGIBLE_LOCATIONS = _list("SEARCH_ELIGIBLE_LOCATIONS")
 
+# Always-on feeds switched off from the Search page's source manager (keys of
+# agents.search_agent.BUILTIN_FEEDS, e.g. "jobicy,workingnomads").
+SEARCH_DISABLED_FEEDS = set(_list("SEARCH_DISABLED_FEEDS"))
+
 # Default position/title to search for -- used by the Search tab's "search
 # now" button and by the scheduler's automatic 8am run alike, so both stay in
 # sync with whatever the user last saved. Blank means "no title filter".
