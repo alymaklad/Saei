@@ -1,25 +1,28 @@
 @echo off
 setlocal
 
-rem Fast path for run_conda.bat: skips "conda env update -f environment.yml
-rem --prune", which is the actual source of the slowness (conda re-resolves
-rem and diffs the whole environment on every launch, even when nothing
-rem changed -- often 10-60+ seconds by itself). This script just activates
-rem the existing "job-agent" env and starts the app directly.
+rem Sa'ei quick launcher: the same as run_conda.bat minus the dependency sync
+rem ("conda env update -f environment.yml --prune"), which is what makes that
+rem script slow -- conda re-resolves and diffs the whole environment on every
+rem launch, even when nothing changed (often 10-60+ seconds by itself). This
+rem one just activates the existing "job-agent" env, starts Ollama when .env
+rem uses it, then the API and the scheduler, and opens the dashboard once the
+rem API answers.
 rem
-rem Use run_conda.bat instead of this one whenever a DEPENDENCY has changed --
-rem this script does NOT sync them, so it won't pick that up.
-rem
-rem That means environment.yml *or* requirements.txt: environment.yml only
-rem says "pip install -r requirements.txt", so package changes actually live
-rem in requirements.txt and environment.yml itself rarely changes. A missing
-rem package usually shows up as an unexplained deprecation warning or an
-rem ImportError from a provider class, not as an obvious "not installed"
-rem error -- so if something looks stale after a git pull, run run_conda.bat
-rem once before debugging anything else.
+rem Use run_conda.bat instead whenever a DEPENDENCY has changed -- this script
+rem does NOT sync them. That means environment.yml *or* requirements.txt:
+rem environment.yml only says "pip install -r requirements.txt", so package
+rem changes actually live in requirements.txt. A missing package usually shows
+rem up as an unexplained deprecation warning or an ImportError from a provider
+rem class, not as an obvious "not installed" error -- so if something looks
+rem stale after a git pull, run run_conda.bat once before debugging anything.
 
 rem Always run from this script's own folder, regardless of where it's launched from.
 cd /d "%~dp0"
+
+set "API_PORT=8001"
+set "API_URL=http://localhost:%API_PORT%"
+set "OLLAMA_URL=http://localhost:11434"
 
 where conda >nul 2>nul
 if errorlevel 1 (
@@ -29,6 +32,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem ---- 1. Environment (must already exist -- no sync here) -----------------
 conda env list | findstr /b /c:"job-agent " >nul
 if errorlevel 1 (
     echo The "job-agent" conda environment doesn't exist yet.
@@ -45,26 +49,98 @@ if not exist ".env" (
     exit /b 0
 )
 
-echo Starting dashboard API on http://localhost:8001 ...
-start "Job Agent - API" cmd /k "conda activate job-agent && python -m uvicorn api:app --host 127.0.0.1 --port 8001"
+rem ---- 2. Port check --------------------------------------------------------
+rem Another app on the same port makes uvicorn exit at once with "address
+rem already in use" -- say so here instead of leaving a dead API window.
+netstat -ano | findstr /r /c:":%API_PORT% .*LISTENING" >nul
+if not errorlevel 1 (
+    curl -s -m 3 "%API_URL%/api/status" | findstr /c:"llm_provider" >nul
+    if not errorlevel 1 (
+        echo Sa'ei is already running on %API_URL% -- opening the dashboard.
+        start "" "frontend\index.html"
+        exit /b 0
+    )
+    echo Port %API_PORT% is taken by another program, so the Sa'ei API can't start.
+    echo Close that program, or change the port in this script and in frontend\config.js.
+    pause
+    exit /b 1
+)
 
-echo Starting scheduler (daily/weekly triggers) ...
-start "Job Agent - Scheduler" cmd /k "conda activate job-agent && python scheduler.py"
+rem ---- 3. Ollama (only when .env uses it) -----------------------------------
+rem Embeddings and/or the LLM run locally when .env says "ollama". Without it
+rem the search still runs, but semantic matching is skipped.
+findstr /r /i /c:"^LLM_PROVIDER=ollama" /c:"^EMBEDDING_PROVIDER=ollama" ".env" >nul
+if not errorlevel 1 call :start_ollama
+
+rem ---- 4. API + scheduler ---------------------------------------------------
+echo Starting the Sa'ei API on %API_URL% ...
+start "Sa'ei - API" cmd /k "conda activate job-agent && python -m uvicorn api:app --host 127.0.0.1 --port %API_PORT%"
+
+echo Starting the scheduler (daily/weekly triggers) ...
+start "Sa'ei - Scheduler" cmd /k "conda activate job-agent && python scheduler.py"
 
 rem If those windows immediately close or show "'conda' is not recognized" /
 rem "CondaError: Run 'conda init'", conda hasn't been initialized for a plain
 rem Command Prompt yet -- run `conda init cmd.exe` once from an Anaconda
 rem Prompt, restart your terminal, then run this script again.
 
+rem Wait until the API actually answers (up to ~60s: first start loads the
+rem models and the database) rather than guessing with a fixed delay.
 echo Waiting for the API to come up...
-timeout /t 3 /nobreak >nul
+set /a tries=0
+:wait_api
+curl -s -m 2 "%API_URL%/api/status" >nul 2>nul
+if not errorlevel 1 goto api_up
+set /a tries+=1
+if %tries% geq 30 (
+    echo The API didn't answer after a minute -- check the "Sa'ei - API" window for errors.
+    echo Opening the dashboard anyway; it will connect once the API is up.
+    goto open_dashboard
+)
+"%SystemRoot%\System32\timeout.exe" /t 2 /nobreak >nul
+goto wait_api
 
-echo Opening dashboard...
+:api_up
+echo API is up.
+
+:open_dashboard
+echo Opening the dashboard...
 start "" "frontend\index.html"
 
 echo.
-echo Job Application Agent is running (conda env: job-agent, no dependency sync).
-echo   - API + Scheduler are in the two new console windows -- close them to stop.
-echo   - Dashboard opened in your browser (reads from http://localhost:8001).
+echo Sa'ei is running (conda env: job-agent, no dependency sync).
+echo   - API and scheduler are in the two new console windows -- close them to stop.
+echo   - The dashboard opened in your browser and reads from %API_URL%.
 echo.
 endlocal
+exit /b 0
+
+rem ---- helpers ---------------------------------------------------------------
+:start_ollama
+curl -s -m 2 "%OLLAMA_URL%/api/version" >nul 2>nul
+if not errorlevel 1 (
+    echo Ollama is already running.
+    exit /b 0
+)
+set "OLLAMA_EXE="
+for /f "delims=" %%i in ('where ollama 2^>nul') do if not defined OLLAMA_EXE set "OLLAMA_EXE=%%i"
+if not defined OLLAMA_EXE if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA_EXE=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
+if not defined OLLAMA_EXE (
+    echo .env uses Ollama, but Ollama isn't installed -- semantic matching will be skipped.
+    echo Install it from https://ollama.com, or change the provider in Settings.
+    exit /b 0
+)
+echo Starting Ollama...
+start "Sa'ei - Ollama" /min "%OLLAMA_EXE%" serve
+set /a otries=0
+:wait_ollama
+"%SystemRoot%\System32\timeout.exe" /t 1 /nobreak >nul
+curl -s -m 2 "%OLLAMA_URL%/api/version" >nul 2>nul
+if not errorlevel 1 (
+    echo Ollama is up.
+    exit /b 0
+)
+set /a otries+=1
+if %otries% lss 15 goto wait_ollama
+echo Ollama didn't answer after 15 seconds -- the search will run without semantic matching.
+exit /b 0

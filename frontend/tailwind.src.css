@@ -6,7 +6,11 @@
   font-family: "Plus Jakarta Sans";
   font-style: normal;
   font-weight: 200 800;
-  font-display: swap;
+  /* optional, not swap: text shows at once and never re-renders mid-page.
+     Once the font is cached (after the first page) it's used straight away;
+     a page that paints before it's available keeps the fallback, instead of
+     visibly swapping -- that swap was the blink between pages. */
+  font-display: optional;
   src: url(assets/fonts/plus-jakarta-sans-latin.woff2) format("woff2");
 }
 
@@ -23,7 +27,9 @@
 @tailwind utilities;
 
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  /* The background is on <html> too, so the moment between two pages shows
+     the app's own colour rather than a white flash. */
+  html { -webkit-text-size-adjust: 100%; @apply bg-background; }
   /* Desktop-only dashboard: narrower windows scroll sideways rather than reflow. */
   body { @apply min-w-[1100px] bg-background font-sans text-body-md text-on-surface antialiased; }
   [hidden] { display: none !important; }
@@ -41,6 +47,12 @@
     letter-spacing: normal;
     text-transform: none;
     display: inline-block;
+    /* A fixed 1em box: before the icon font loads, the hidden ligature word
+       ("home") would otherwise take a word's width and shove its neighbours
+       over when the glyph replaces it. */
+    width: 1em;
+    height: 1em;
+    overflow: hidden;
     white-space: nowrap;
     word-wrap: normal;
     direction: ltr;

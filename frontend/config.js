@@ -33,22 +33,40 @@ function escapeHtml(str) {
 }
 
 // The status pill lives in the shared nav header on every page.
-async function loadNavStatus() {
+// The pill shows the last known status straight away (kept for the browser
+// session), then refreshes it -- instead of flashing "checking status..." on
+// every page.
+const NAV_STATUS_KEY = "saei.navStatus";
+
+function paintNavStatus(pill, text, cls) {
+  pill.textContent = text;
+  pill.className = cls;
+}
+
+function paintCachedNavStatus() {
   const pill = document.getElementById("status-pill");
   if (!pill) return;
   try {
-    const status = await getJSON("/api/status");
-    if (status.dry_run) {
-      pill.textContent = "Dry run · nothing is sent";
-      pill.className = "pill pill-warn";
-    } else {
-      pill.textContent = "Autonomous mode · Active";
-      pill.className = "pill pill-ok";
-    }
-  } catch (e) {
-    pill.textContent = "Backend unreachable";
-    pill.className = "pill pill-muted";
-  }
+    const cached = JSON.parse(sessionStorage.getItem(NAV_STATUS_KEY) || "null");
+    if (cached) paintNavStatus(pill, cached.text, cached.cls);
+  } catch (e) { /* private mode: keep the placeholder */ }
 }
 
+async function loadNavStatus() {
+  const pill = document.getElementById("status-pill");
+  if (!pill) return;
+  let text, cls;
+  try {
+    const status = await getJSON("/api/status");
+    [text, cls] = status.dry_run
+      ? ["Dry run · nothing is sent", "pill pill-warn"]
+      : ["Autonomous mode · Active", "pill pill-ok"];
+  } catch (e) {
+    [text, cls] = ["Backend unreachable", "pill pill-muted"];
+  }
+  paintNavStatus(pill, text, cls);
+  try { sessionStorage.setItem(NAV_STATUS_KEY, JSON.stringify({ text, cls })); } catch (e) { /* private mode */ }
+}
+
+paintCachedNavStatus();  // config.js loads right after shell.js has built the header
 document.addEventListener("DOMContentLoaded", loadNavStatus);
