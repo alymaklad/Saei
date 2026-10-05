@@ -34,6 +34,41 @@
   --shadow-md: 0 12px 32px -12px rgba(34, 31, 26, 0.28);
 }
 
+/* A quiet brand signature used on the key career surfaces.  It deliberately
+   sits behind the content so it reads as atmosphere, not as a competing logo. */
+.sa-saei-wordmark {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.sa-saei-wordmark::before {
+  content: "ساعي";
+  position: absolute;
+  right: 24px;
+  bottom: -18px;
+  z-index: -1;
+  direction: rtl;
+  color: #f3e6e1;
+  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  font-size: 132px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.12em;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sa-saei-wordmark > * {
+  position: relative;
+  z-index: 1;
+}
+
+.sa-saei-wordmark-trajectory::before { font-size: 88px; right: 22px; bottom: -10px; }
+.sa-saei-wordmark-search::before { font-size: 112px; bottom: -12px; }
+.sa-saei-wordmark-profile::before { font-size: 104px; right: 22px; bottom: -12px; }
+
 * { box-sizing: border-box; }
 
 body {
