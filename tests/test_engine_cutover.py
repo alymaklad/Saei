@@ -99,7 +99,7 @@ def test_a_full_rewrite_run_costs_no_extra_llm_calls(monkeypatch, tmp_path):
         calls["profile"] += 1
         return REQUIREMENTS_RESULT["cv_profile"]
 
-    def fake_entail(unmatched, spans, decisions=None):
+    def fake_entail(unmatched, spans, decisions=None, soft_lines=None):
         # `decisions` is the retrieval shortlist (Level B). Accepted here so
         # this double keeps matching the real signature -- the point of the
         # test is the CALL COUNT, and a double that silently stops being

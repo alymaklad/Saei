@@ -381,7 +381,7 @@ def test_a_claimed_only_row_is_still_offered_for_judgement():
         "skills_claimed": ["Full-stack development"], "_cached": True,
     }
 
-    def verdict(unmatched, spans, decisions=None):
+    def verdict(unmatched, spans, decisions=None, soft_lines=None):
         assert any(r["name"] == "Full-stack development" for r in unmatched), (
             "a claimed-only row must reach the adjudication call")
         return {"full-stack development": {
@@ -418,7 +418,7 @@ def test_a_verdict_never_overwrites_a_stronger_table_match():
         "skills_claimed": [], "_cached": True,
     }
 
-    def verdict(unmatched, spans, decisions=None):
+    def verdict(unmatched, spans, decisions=None, soft_lines=None):
         return {"pytorch": {
             "match": "semantic_support", "relation": "semantic_support",
             "evidence_location": "demonstrated", "relation_label": "Semantic support",

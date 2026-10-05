@@ -245,7 +245,7 @@ function getCvStatus() {
 
 const BUCKET_SHORT = {
   required_skills: "Req", experience: "Exp", preferred_skills: "Pref",
-  responsibilities: "Resp", education: "Edu",
+  responsibilities: "Resp", education: "Edu", soft_skills: "Soft",
 };
 
 // Found evidence reads green, partial relations amber, unmet orange -- the

@@ -239,7 +239,7 @@ def build_improvement_explanation(original: dict, tailored: dict) -> str:
 
 from agents import (cv_profile, evidence_retrieval, matching_types,
                     recommendation, requirement_normalizer,
-                    semantic_matching, skill_matching)
+                    semantic_matching, skill_matching, soft_skills)
 
 REQUIREMENT_CATEGORIES = (
     "technical_skill", "tool", "domain_knowledge", "soft_skill",
@@ -252,6 +252,7 @@ BUCKET_LABELS = {
     "preferred_skills": "Preferred skills & tools",
     "responsibilities": "Responsibilities alignment",
     "education": "Education & certifications",
+    "soft_skills": "Soft skills",
 }
 
 # How the CV term relates to the requirement. Deliberately NOT called
@@ -330,7 +331,8 @@ Rules:
 - A more specific skill satisfies a more general requirement: "Trained a CNN" DOES demonstrate "Deep learning".
 - A sibling technology does NOT satisfy a requirement: Google Cloud does NOT demonstrate AWS, TensorFlow does NOT demonstrate PyTorch. Related is not the same as equivalent.
 - satisfied must be false when no CV line supports it. Never write evidence that is not copied verbatim from the CV lines given.
-- Being plausible for the candidate is not evidence. Only what the CV states counts."""
+- Being plausible for the candidate is not evidence. Only what the CV states counts.
+- A SOFT SKILL is demonstrated by what the work required, not by the CV naming it: "Led the technical team and managed delivery" demonstrates team management and leadership. Lines marked "<- shows ..." were read from the whole CV as showing those soft skills; still decide whether that is the requirement asked about. Copy only the CV line itself as evidence, never the "<- shows" note."""
 
 
 def extract_requirements(job_description: str) -> dict:
@@ -458,6 +460,12 @@ def _bucket_for(requirement: dict) -> str:
     category, importance = requirement["category"], requirement["importance"]
     if category == "experience":
         return "experience"
+    if category == "soft_skill":
+        # Their own small bucket, required or preferred alike. Inside
+        # "required skills" seven soft skills (2 pts each) outweighed Python
+        # (10), and a CV rarely states them in words -- so the bucket that
+        # matters most was decided by how a CV is phrased.
+        return "soft_skills"
     if category in ("education", "certification"):
         return "education"
     if category == "responsibility":
@@ -564,6 +572,23 @@ def match_requirement(requirement: dict, spans: list[dict]) -> dict:
             best = max(candidates, key=_candidate_rank)
             return _outcome(best[0], best[1], best[2], best[3], via=best[4])
 
+        # Same words, any order: "Computer Science degree" against "Bachelor
+        # Degree Computer Science". Every content word of the requirement has
+        # to sit close together in one line (filler like "degree", "in",
+        # "or related field" is ignored), so it is the requirement itself,
+        # not a coincidence of words across a paragraph.
+        credential = requirement.get("category") in ("education", "certification")
+        word_hits = []
+        for span in spans:
+            hit = skill_matching.find_words_any_order(name, span["text"], allow_single=credential)
+            if hit:
+                location = "demonstrated" if span.get("demonstrated") else "claimed"
+                word_hits.append(("exact", location, hit, span,
+                                  f"the same words in a different order: “{hit}”"))
+        if word_hits:
+            best = max(word_hits, key=_candidate_rank)
+            return _outcome(best[0], best[1], best[2], best[3], via=best[4])
+
     return {
         "match": "missing", "relation": "none", "evidence_location": "none",
         "relation_label": RELATION_LABELS["none"], "evidence_label": "",
@@ -620,8 +645,30 @@ def _outcome(relation: str, location: str, hit: str, span: dict,
     }
 
 
+def _soft_skill_block(requirements: list[dict], soft_lines: dict[str, list[str]],
+                      work_lines: list[str]) -> str:
+    """One block for every soft-skill requirement: the CV's work lines, with
+    the ones the whole-CV read found soft skills in (agents/soft_skills.py)
+    marked with what they show, then the requirements to judge.
+
+    All the work lines, not just the marked ones: the read lists the obvious
+    skills, and "experimentation mindset" can still sit in a line it didn't
+    flag. Retrieval by similarity doesn't rescue that case -- soft skills sit
+    far from any one line in embedding space, so it routinely returns nothing
+    for all of them. Printed once for every soft skill, so the cost is one
+    copy of the work section."""
+    ordered = list(dict.fromkeys(list(soft_lines) + list(work_lines)))
+    lines = "\n".join(
+        f"  - {line}  <- shows {', '.join(soft_lines[line])}" if line in soft_lines else f"  - {line}"
+        for line in ordered)
+    names = "\n".join(f"  - {r['name']}" for r in requirements)
+    return (f"Soft skills (each judged separately):\n{names}\n"
+            f"CV lines that show soft skills:\n{lines}")
+
+
 def _entailment_payload(unmatched: list[dict], evidence_spans: list[dict],
-                        decisions: dict | None) -> str | None:
+                        decisions: dict | None,
+                        soft_lines: dict[str, list[str]] | None = None) -> str | None:
     """The user message for the adjudication call, or None if there is nothing
     worth asking.
 
@@ -632,8 +679,20 @@ def _entailment_payload(unmatched: list[dict], evidence_spans: list[dict],
     doing its job, and it is why enabling retrieval can only shrink this
     prompt. Without retrieval, every requirement is asked against the same
     slab, exactly as before.
+
+    Soft-skill requirements are pulled out first whenever the whole-CV soft
+    skill read found anything (`soft_lines`): they are judged against those
+    lines, which retrieval by similarity can't find for them.
     """
-    if decisions:
+    soft_block = None
+    if soft_lines:
+        soft = [r for r in unmatched if r.get("category") == "soft_skill"]
+        if soft:
+            soft_block = _soft_skill_block(soft, soft_lines,
+                                           [sp["text"] for sp in evidence_spans[:40]])
+            unmatched = [r for r in unmatched if r.get("category") != "soft_skill"]
+
+    if decisions or (soft_block and not unmatched):
         blocks, unnarrowed = [], []
         for requirement in unmatched:
             decision = decisions.get(_requirement_id(requirement))
@@ -662,6 +721,8 @@ def _entailment_payload(unmatched: list[dict], evidence_spans: list[dict],
             names = "\n".join(f"  - {name}" for name in unnarrowed)
             blocks.append(f"Requirements (each judged separately):\n{names}\n"
                           f"Candidate CV lines for these requirements:\n{general}")
+        if soft_block:
+            blocks.append(soft_block)
         if not blocks:
             return None
         return ("Judge each requirement against ONLY the CV lines listed "
@@ -670,7 +731,8 @@ def _entailment_payload(unmatched: list[dict], evidence_spans: list[dict],
     lines = [f"- {s['text']}" for s in evidence_spans[:80]]
     wanted = [r["name"] for r in unmatched]
     return ("CV lines:\n" + "\n".join(lines)
-            + "\n\nRequirements to judge:\n" + "\n".join(f"- {w}" for w in wanted))
+            + "\n\nRequirements to judge:\n" + "\n".join(f"- {w}" for w in wanted)
+            + (f"\n\n{soft_block}" if soft_block else ""))
 
 
 def _requirement_id(requirement: dict) -> str:
@@ -678,7 +740,8 @@ def _requirement_id(requirement: dict) -> str:
 
 
 def _entailment_pass(unmatched: list[dict], spans: list[dict],
-                     decisions: dict | None = None) -> dict[str, dict]:
+                     decisions: dict | None = None,
+                     soft_lines: dict[str, list[str]] | None = None) -> dict[str, dict]:
     """One batched LLM call covering every still-unmatched requirement.
 
     Batched, not per-requirement, for the reason set out at the top of this
@@ -701,7 +764,7 @@ def _entailment_pass(unmatched: list[dict], spans: list[dict],
         return {}
 
     evidence_spans = [s for s in spans if s.get("demonstrated")] or spans
-    payload = _entailment_payload(unmatched, evidence_spans, decisions)
+    payload = _entailment_payload(unmatched, evidence_spans, decisions, soft_lines)
     if payload is None:
         return {}
     system = prepare_system(_ENTAILMENT_PROMPT)
@@ -716,8 +779,14 @@ def _entailment_pass(unmatched: list[dict], spans: list[dict],
         name = str(item.get("requirement") or "").strip()
         if not name or not item.get("satisfied"):
             continue
-        evidence = str(item.get("evidence") or "").strip()
-        if not evidence or not _evidence_is_real(evidence, evidence_spans):
+        evidence = str(item.get("evidence") or "").split("<- shows")[0].strip()
+        # The soft-skill lines come from the stored profile, which a tailored
+        # CV's rewritten text may phrase differently -- they were verified
+        # against the profile when they were read, and a rewrite can't change
+        # the work they describe.
+        soft_evidence = [{"text": line} for line in (soft_lines or {})]
+        if not evidence or not (_evidence_is_real(evidence, evidence_spans)
+                                or _evidence_is_real(evidence, soft_evidence)):
             continue
         if _cites_a_sibling(name, evidence):
             continue
@@ -936,9 +1005,17 @@ def compute_requirements_score(cv_text: str, job_description: str,
     # Level B. The index is per CV and built once for the whole job; a
     # requirement the deterministic pass already resolved never reaches it,
     # so a CV of well-known technologies costs nothing here at all.
-    index = evidence_retrieval.build_index(spans) if unmatched else None
-    decisions = semantic_matching.shortlist(unmatched, spans, index=index) if unmatched else {}
-    verdicts = _entailment_pass(unmatched, spans, decisions=decisions)
+    # Soft skills: read from the whole profile once (cached per profile) when
+    # the posting asks for any the tables couldn't settle. Read from the
+    # PROFILE's spans even when scoring a rewrite -- the work is the same.
+    soft_lines = None
+    if config.SOFT_SKILL_INFERENCE and any(r.get("category") == "soft_skill" for r in unmatched):
+        profile_spans = cv_profile.evidence_spans(profile, cv_text) if evidence_text is not None else spans
+        soft_lines = soft_skills.evidence_lines(soft_skills.demonstrated_soft_skills(profile_spans)) or None
+    retrievable = [r for r in unmatched if not (soft_lines and r.get("category") == "soft_skill")]
+    index = evidence_retrieval.build_index(spans) if retrievable else None
+    decisions = semantic_matching.shortlist(retrievable, spans, index=index) if retrievable else {}
+    verdicts = _entailment_pass(unmatched, spans, decisions=decisions, soft_lines=soft_lines)
     for row in results:
         verdict = verdicts.get(row["name"].lower())
         # Better credit only. A model verdict never overwrites a stronger

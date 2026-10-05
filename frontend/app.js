@@ -82,6 +82,7 @@ const STATUS_WORDS = {
   pending_review: "Ready to apply",
   cv_rewritten_notify_user: "Tailored",
   auto_submitted: "Submitted",
+  would_apply: "Would have applied",
   sent: "Emailed",
 };
 

@@ -58,7 +58,17 @@ class Application(Base):
     match_score = Column(Float, nullable=True)
     match_breakdown = Column(Text, nullable=True)   # JSON: per-factor score/weight/evidence
     cv_version_path = Column(String)
-    status = Column(String)               # scored_low | drafted | auto_submitted | pending_review | sent
+    # The letter written for this job (agents/cover_letter_agent.py) and
+    # whether it came from the LLM or the fallback template.
+    cover_letter = Column(Text, nullable=True)
+    cover_letter_source = Column(String, nullable=True)
+    # Where the posting asked applications to be emailed, if it did.
+    apply_email = Column(String, nullable=True)
+    # One line on what the apply step did or why it stopped short.
+    apply_note = Column(Text, nullable=True)
+    # pending_review | cv_rewritten_notify_user | would_apply (dry run) |
+    # auto_submitted | sent
+    status = Column(String)
     email_sent = Column(Boolean, default=False)
     date_applied = Column(DateTime, nullable=True)
     date_created = Column(DateTime, default=_utcnow)

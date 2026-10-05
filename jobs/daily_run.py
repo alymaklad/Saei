@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 import config
 from db import get_session, init_db
-from models import Job, Application, SkillGap, PendingJob
+from models import Job, Application, SkillGap, PendingJob, EmailLog
 from agents.search_agent import run_search
 from orchestrator import app as orchestrator_app
 from cv_parser import parse_cv, find_default_cv
@@ -239,10 +239,33 @@ def _finalize_job(
             match_score=match_score,
             match_breakdown=json.dumps(match_breakdown) if match_breakdown else None,
             cv_version_path=result.get("cv_path"),
+            cover_letter=result.get("cover_letter"),
+            cover_letter_source=result.get("cover_letter_source"),
+            apply_email=(result.get("job") or {}).get("apply_email"),
+            apply_note=result.get("note"),
             status=result.get("status", "unknown"),
-            date_applied=datetime.now(timezone.utc) if result.get("status") == "auto_submitted" else None,
+            # Only a real submission is an application date; "would_apply" is a
+            # dry run's record of what would have happened.
+            date_applied=(datetime.now(timezone.utc)
+                          if result.get("status") in ("auto_submitted", "sent") else None),
+            email_sent=result.get("status") == "sent",
         )
         session.add(app_row)
+
+        # The email route's send (or dry run, or failure) goes in the same log
+        # the Applications page's manual send writes to.
+        email = result.get("email")
+        if email:
+            session.flush()  # app_row.id for the log row
+            session.add(EmailLog(
+                application_id=app_row.id,
+                to_email=email.get("to"),
+                subject=email.get("subject"),
+                gmail_message_id=email.get("gmail_message_id"),
+                dry_run=bool(email.get("dry_run")),
+                status=email.get("status"),
+                error_message=email.get("error"),
+            ))
 
         if ats_result.get("missing_skills"):
             session.add(SkillGap(

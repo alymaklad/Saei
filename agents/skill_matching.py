@@ -587,6 +587,34 @@ def is_known(term: str) -> bool:
             or bool(_IMPLIED_BY_NORM.get(canonical(term))))
 
 
+# Heads that ask for INSTANCES of a field: "AI tools" wants named tools
+# (LangChain, Flowise), "cloud platforms" wants AWS or GCP. Stripping the head
+# off one of those leaves the bare field word -- "ai", "cloud" -- which then
+# matches anywhere the word appears: an "AI Intern" job title scored "Familiarity
+# with AI tools" at full credit. So when what's left is a broad field, the
+# phrase is kept whole and judged on evidence instead. A specific tool keeps
+# its reduction: "Docker tooling" still means Docker.
+_INSTANCE_HEADS = {
+    "tools", "tooling", "platforms", "platform", "technologies", "technology",
+    "stack", "services", "solutions", "systems", "system", "ecosystem",
+}
+_BROAD_FIELDS = {
+    "ai", "artificial intelligence", "machine learning", "ml", "deep learning",
+    "generative ai", "genai", "gen ai", "llm", "llms", "large language models",
+    "nlp", "natural language processing", "computer vision", "data", "data science",
+    "big data", "cloud", "devops", "mlops", "automation", "analytics", "security",
+    "cybersecurity", "web", "mobile", "backend", "frontend", "bi",
+    "business intelligence", "agentic ai", "ai agents", "agents",
+}
+
+
+def _is_broad_field(term: str) -> bool:
+    norm = normalize(term)
+    fields = {normalize(f) for f in _BROAD_FIELDS}
+    return norm in fields or _SURFACE_TO_CANON.get(norm, norm) in {
+        _SURFACE_TO_CANON.get(f, f) for f in fields}
+
+
 def _reduce_to_known_core(norm: str) -> str | None:
     """Strip generic packaging, but ONLY when what's left is a term the tables
     already know.
@@ -608,12 +636,16 @@ def _reduce_to_known_core(norm: str) -> str | None:
             break
 
     words = candidate.split()
+    stripped = []
     while len(words) > 1 and words[-1] in _GENERIC_HEADS:
+        stripped.append(words[-1])
         words = words[:-1]
     candidate = " ".join(words)
 
     if candidate == norm or not candidate:
         return None
+    if _INSTANCE_HEADS.intersection(stripped) and _is_broad_field(candidate):
+        return None  # "AI tools" -> keep it whole, not "ai"
     if _is_known(candidate):
         return candidate
     for variant in _plural_variants(candidate):
@@ -867,6 +899,72 @@ def find_term(term: str, text: str) -> str | None:
     for form in surface_forms(term):
         if _search(form, text, canon):
             return form
+    return None
+
+
+# Words that carry no meaning of their own in a requirement: "Degree in
+# Computer Science or a related field" asks for exactly "computer science".
+_FILLER_WORDS = {
+    "a", "an", "the", "in", "of", "or", "and", "with", "on", "for", "to", "its",
+    "degree", "degrees", "related", "field", "fields", "equivalent", "similar",
+    "relevant", "discipline", "disciplines", "studies", "study", "program",
+    "programme", "major", "majoring", "background", "qualification",
+    "qualifications", "programming", "preferably", "ideally", "etc",
+}
+# Spellings of the same credential level. Short forms that are also ordinary
+# words or other things ("MS Office", "BA" airline, "MA" state) are left out.
+_DEGREE_LEVELS = [
+    (re.compile(r"\b(?:bachelor(?:'?s)?|b\.?\s?sc\.?|bsc|b\.?\s?eng\.?|beng|undergraduate)(?![a-z])", re.I), " bachelor "),
+    (re.compile(r"\b(?:master(?:'?s)?|m\.?\s?sc\.?|msc|m\.?\s?eng\.?|meng|postgraduate)(?![a-z])", re.I), " master "),
+    (re.compile(r"\b(?:ph\.?\s?d\.?|doctorate|doctoral)(?![a-z])", re.I), " phd "),
+    (re.compile(r"\bcs\b", re.I), " computer science "),
+    (re.compile(r"\bit\b(?=\s*(?:degree|field|major|background))", re.I), " information technology "),
+]
+_WORD_RE = re.compile(r"[a-z0-9+#]+")
+# Extra words allowed among the requirement's own: one for a skill phrase, two
+# for a credential ("BSc (Hons) in Computer Science"). Any looser and words
+# scattered across an unrelated sentence start to count.
+_ANY_ORDER_SLACK = 1
+_ANY_ORDER_SLACK_CREDENTIAL = 2
+
+
+def _content_words(text: str) -> list[str]:
+    text = fold_typography(text or "").lower()
+    for pattern, replacement in _DEGREE_LEVELS:
+        text = pattern.sub(replacement, text)
+    return _WORD_RE.findall(text)
+
+
+def find_words_any_order(term: str, text: str, allow_single: bool = False) -> str | None:
+    """The stretch of `text` holding every content word of `term`, in any
+    order and close together, or None.
+
+    "Computer Science degree" against "Dual Bachelor Degree Computer Science":
+    the words are all there, in another order, so it is the requirement --
+    not a keyword match that needs a model's opinion. Filler words are ignored
+    and credential levels are normalised (BSc, Bachelor's -> bachelor), but a
+    level is a content word: a master's requirement is never met by a
+    bachelor's. Needs at least two content words, unless `allow_single` (a
+    credential like "Bachelor's degree" is one word once the filler is gone).
+    """
+    wanted = [w for w in _content_words(term) if w not in _FILLER_WORDS]
+    wanted = list(dict.fromkeys(wanted))  # unique, in order
+    if not wanted or (len(wanted) < 2 and not allow_single):
+        return None
+    # Filler is ignored on the CV side too, so "the design of the data
+    # pipeline" doesn't spend the allowance on "of the".
+    words = [w for w in _content_words(text) if w not in _FILLER_WORDS]
+    if not set(wanted) <= set(words):
+        return None
+    window = len(wanted) + (_ANY_ORDER_SLACK_CREDENTIAL if allow_single else _ANY_ORDER_SLACK)
+    need = set(wanted)
+    for start in range(len(words)):
+        if words[start] not in need:
+            continue
+        chunk = words[start:start + window]
+        if need <= set(chunk):
+            last = max(i for i, w in enumerate(chunk) if w in need)
+            return " ".join(chunk[:last + 1])
     return None
 
 

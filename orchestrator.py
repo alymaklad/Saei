@@ -7,7 +7,7 @@ score -> (low fit) -> rewrite_cv -> (tailored score still low, or
                                   -> (config.AUTO_APPLY_ON_TAILORED_SCORE is
                                       on AND tailored score clears
                                       config.FIT_THRESHOLD) -> decide_apply_path
-       -> (good fit) -> decide_apply_path -> auto_submit | draft_for_review -> END
+       -> (good fit) -> decide_apply_path -> auto_submit | email_apply | draft_for_review -> END
 
 "Low fit" / "good fit" above is decided against config.FIT_THRESHOLD (0.0-1.0,
 default 0.7, user-configurable from the Settings page -- see
@@ -19,8 +19,14 @@ config.AUTO_APPLY_MODE ("off" / "any" / "whitelist", Settings page) and, in
 "whitelist" mode, config.WHITELISTED_SOURCES too. See that file's docstring
 for what each mode actually does.
 
-Respects config.DRY_RUN globally: when true, auto_submit logs intent instead
-of calling the real submit function.
+Every path out of decide_apply_path carries a cover letter
+(agents/cover_letter_agent.py) and a CV to attach -- the tailored one when the
+job was rewritten, otherwise the master CV the user uploaded.
+
+Respects config.DRY_RUN globally: when true, auto_submit and email_apply
+record status "would_apply" (what WOULD have been sent) instead of submitting
+or emailing anything. A job routed to a submitter that doesn't exist yet
+falls back to a draft rather than failing.
 """
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
@@ -28,7 +34,8 @@ from langgraph.graph import StateGraph, END
 import config
 from agents.ats_agent import compute_ats_score, build_improvement_explanation
 from agents.cv_rewriter_agent import rewrite_cv, render_cv_text, save_cv_as_pdf
-from agents.apply_agent import decide_apply_path, draft_for_review, auto_submit_greenhouse
+from agents.apply_agent import (decide_apply_path, draft_for_review, auto_submit_greenhouse,
+                                find_application_email)
 
 
 class State(TypedDict):
@@ -40,6 +47,11 @@ class State(TypedDict):
     tailored_ats_result: Optional[dict]
     tailored_ats_explanation: Optional[str]
     apply_path: Optional[str]
+    attachment_path: Optional[str]
+    cover_letter: Optional[str]
+    cover_letter_source: Optional[str]
+    email: Optional[dict]
+    note: Optional[str]
     status: str
     result: Optional[dict]
 
@@ -230,46 +242,136 @@ def route_after_rewrite(state: State) -> str:
     return "end"
 
 
+def _master_cv() -> str | None:
+    from cv_parser import find_default_cv
+    return find_default_cv("cv")
+
+
 def decide_apply_path_node(state: State) -> State:
-    state["apply_path"] = decide_apply_path(state["job"])
+    job = state["job"]
+    if "apply_email" not in job:
+        job["apply_email"] = find_application_email(job.get("description"))
+    # Always something to attach: the tailored CV when this job was rewritten,
+    # otherwise the master CV -- the one that scored well enough to skip it.
+    state["attachment_path"] = state.get("cv_path") or _master_cv()
+    state["apply_path"] = decide_apply_path(job)
     return state
 
 
 def route_on_apply_path(state: State) -> str:
-    return state["apply_path"]  # "auto_submit" or "draft_for_review"
+    return state["apply_path"]  # "auto_submit", "email_apply" or "draft_for_review"
+
+
+def _write_cover_letter(state: State) -> str:
+    """Generates (once) and stores the job's cover letter."""
+    if not state.get("cover_letter"):
+        from agents.cover_letter_agent import generate_cover_letter
+        ats = state.get("tailored_ats_result") or state.get("ats_result") or {}
+        letter = generate_cover_letter(_stored_profile() or ats.get("cv_profile"), state["job"],
+                                       requirement_names=_evidenced_requirements(ats))
+        state["cover_letter"] = letter["text"]
+        state["cover_letter_source"] = letter["source"]
+    return state["cover_letter"]
+
+
+def _evidenced_requirements(ats: dict) -> list[str]:
+    """Names of the job's requirements the profile already evidences."""
+    names = []
+    for item in ats.get("requirement_results") or []:
+        if isinstance(item, dict) and (item.get("met") or (item.get("credit") or 0) > 0):
+            name = item.get("name") or item.get("requirement") or item.get("text")
+            if name:
+                names.append(str(name))
+    return names or list(ats.get("matched_skills") or [])
+
+
+def _applicant_name() -> str:
+    profile = _stored_profile() or {}
+    return ((profile.get("contact") or {}).get("full_name") or config.APPLICANT_NAME or "").strip()
+
+
+def _as_draft(state: State, note: str | None = None) -> State:
+    letter = _write_cover_letter(state)
+    state["result"] = draft_for_review(state["job"], state.get("attachment_path") or "", letter, note=note)
+    state["note"] = note
+    state["status"] = "pending_review"
+    return state
 
 
 def auto_submit_node(state: State) -> State:
     job = state["job"]
+    letter = _write_cover_letter(state)
     if config.DRY_RUN:
-        state["status"] = "auto_submitted"
+        state["status"] = "would_apply"
+        state["note"] = "Dry run: this would have been submitted through the site's application form."
         state["result"] = {
             "dry_run": True,
-            "status": "auto_submitted",
+            "status": "would_apply",
             "job_url": job.get("url") or job.get("hostedUrl"),
         }
         return state
 
     # Real submission only reaches here per config.AUTO_APPLY_MODE (see
-    # agents/apply_agent.py::decide_apply_path) -- "whitelist" mode requires
-    # the source to be in WHITELISTED_SOURCES; "any" mode reaches here for
-    # every source, though auto_submit_greenhouse itself is still a
-    # Greenhouse-specific stub until hand-verified per board.
-    auto_submit_greenhouse(
-        job_url=job.get("url") or job.get("hostedUrl"),
-        cv_path=state.get("cv_path", ""),
-        cover_letter="",
-        applicant_info={"name": config.APPLICANT_NAME, "email": config.APPLICANT_EMAIL},
-    )
+    # agents/apply_agent.py::decide_apply_path). No site has a working
+    # submitter yet (auto_submit_greenhouse is a stub), so this lands in the
+    # draft fallback rather than failing a job that's already been scored
+    # and tailored.
+    try:
+        auto_submit_greenhouse(
+            job_url=job.get("url") or job.get("hostedUrl"),
+            cv_path=state.get("attachment_path") or "",
+            cover_letter=letter,
+            applicant_info={"name": config.APPLICANT_NAME, "email": config.APPLICANT_EMAIL},
+        )
+    except NotImplementedError:
+        return _as_draft(state, "Sa'ei can't submit to this site's application form yet, "
+                                "so it's ready for you to send.")
     state["status"] = "auto_submitted"
     return state
 
 
-def draft_node(state: State) -> State:
-    draft = draft_for_review(state["job"], state.get("cv_path", ""), cover_letter="")
-    state["status"] = "pending_review"
-    state["result"] = draft
+def email_apply_node(state: State) -> State:
+    """Emails the CV and cover letter to the address the posting gave.
+
+    Falls back to a draft (address filled in) whenever sending isn't
+    possible: no CV to attach, or Gmail not connected -- checked up front,
+    because an unattended run must never open the interactive sign-in."""
+    from agents import email_agent
+    job = state["job"]
+    to = job.get("apply_email")
+    attachment = state.get("attachment_path")
+    if not attachment:
+        return _as_draft(state, "No CV to attach -- upload one on the CV page.")
+    if not config.DRY_RUN and not email_agent.is_authenticated():
+        return _as_draft(state, "Gmail isn't connected, so the email wasn't sent. "
+                                "Connect it in Settings, or send it from here.")
+
+    letter = _write_cover_letter(state)
+    name = _applicant_name()
+    subject = f"Application for {job.get('title') or 'the open position'}" + (f" – {name}" if name else "")
+    try:
+        sent = email_agent.send_application_email(to, subject, letter, attachment)
+    except Exception as exc:  # noqa: BLE001 -- a send failure leaves a ready draft
+        state["email"] = {"to": to, "subject": subject, "status": "failed", "dry_run": False,
+                          "error": str(exc)}
+        return _as_draft(state, f"Sending the email failed ({exc}), so it's ready for you to send.")
+
+    dry = bool(sent.get("dry_run"))
+    state["email"] = {"to": to, "subject": subject, "dry_run": dry,
+                      "status": "dry_run" if dry else "sent",
+                      "gmail_message_id": sent.get("gmail_message_id")}
+    state["status"] = "would_apply" if dry else "sent"
+    state["note"] = (f"Dry run: this would have been emailed to {to}." if dry
+                     else f"Emailed to {to}.")
+    state["result"] = {"status": state["status"], "email": state["email"]}
     return state
+
+
+def draft_node(state: State) -> State:
+    note = None
+    if state["job"].get("apply_email"):
+        note = f"The posting asks for applications by email to {state['job']['apply_email']}."
+    return _as_draft(state, note)
 
 
 def build_graph():
@@ -278,6 +380,7 @@ def build_graph():
     graph.add_node("rewrite_cv", rewrite_node)
     graph.add_node("decide_apply_path", decide_apply_path_node)
     graph.add_node("auto_submit", auto_submit_node)
+    graph.add_node("email_apply", email_apply_node)
     graph.add_node("draft_for_review", draft_node)
 
     graph.set_entry_point("score")
@@ -288,9 +391,11 @@ def build_graph():
         "decide_apply_path": "decide_apply_path", "end": END,
     })
     graph.add_conditional_edges("decide_apply_path", route_on_apply_path, {
-        "auto_submit": "auto_submit", "draft_for_review": "draft_for_review",
+        "auto_submit": "auto_submit", "email_apply": "email_apply",
+        "draft_for_review": "draft_for_review",
     })
     graph.add_edge("auto_submit", END)
+    graph.add_edge("email_apply", END)
     graph.add_edge("draft_for_review", END)
     return graph.compile()
 

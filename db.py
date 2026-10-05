@@ -69,6 +69,10 @@ def _migrate_schema():
             "match_score": "FLOAT",
             "match_breakdown": "TEXT",
             "scoring_engine": "TEXT",
+            "cover_letter": "TEXT",
+            "cover_letter_source": "TEXT",
+            "apply_email": "TEXT",
+            "apply_note": "TEXT",
         },
     }
     with engine.connect() as conn:

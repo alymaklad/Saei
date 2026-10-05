@@ -190,6 +190,7 @@ loadOllamaStatus();
 const autoApplyModeSelect = document.getElementById("auto-apply-mode");
 const fitThresholdInput = document.getElementById("fit-threshold");
 const tailoredScoreToggle = document.getElementById("toggle-auto-apply-tailored");
+const emailApplyToggle = document.getElementById("toggle-auto-apply-email");
 const autoApplySaveMessage = document.getElementById("auto-apply-save-message");
 const atsScoreModeSelect = document.getElementById("ats-score-mode");
 const atsScoreModeDesc = document.getElementById("ats-score-mode-desc");
@@ -219,9 +220,9 @@ let lastKnownWhitelistedSources = [];
 function updateAutoApplyModeDesc() {
   const mode = autoApplyModeSelect.value;
   if (mode === "off") {
-    autoApplyModeDesc.textContent = "Every job drafts for review. Nothing auto-submits.";
+    autoApplyModeDesc.textContent = "Every job drafts for review, with its CV and cover letter ready. Nothing is sent.";
   } else if (mode === "any") {
-    autoApplyModeDesc.textContent = "Auto-submits regardless of source or whitelist. Real submission is still limited to Greenhouse boards that have been hand-verified (see the tooltip above).";
+    autoApplyModeDesc.textContent = "Applies wherever a job clears your threshold. Email applications are sent when the email switch is on; jobs on sites with application forms become drafts, since no site has a form submitter yet.";
   } else {
     autoApplyModeDesc.textContent = lastKnownWhitelistedSources.length
       ? `Only these whitelisted sources auto-submit: ${lastKnownWhitelistedSources.join(", ")}. Everything else drafts for review.`
@@ -237,6 +238,7 @@ async function loadAutoApplySettings() {
     autoApplyModeSelect.value = s.auto_apply_mode;
     fitThresholdInput.value = Math.round(s.fit_threshold * 100);
     tailoredScoreToggle.checked = s.auto_apply_on_tailored_score;
+    emailApplyToggle.checked = !!s.auto_apply_email;
     atsScoreModeSelect.value = s.ats_score_mode || "both";
     lastKnownWhitelistedSources = s.whitelisted_sources;
     updateAutoApplyModeDesc();
@@ -265,6 +267,7 @@ document.getElementById("auto-apply-form").addEventListener("submit", async (e) 
     const result = await postJSON("/api/settings/auto-apply", {
       auto_apply_mode: autoApplyModeSelect.value,
       auto_apply_on_tailored_score: tailoredScoreToggle.checked,
+      auto_apply_email: emailApplyToggle.checked,
       fit_threshold: pct / 100,
       ats_score_mode: atsScoreModeSelect.value,
     });

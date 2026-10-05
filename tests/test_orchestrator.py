@@ -16,8 +16,18 @@ route_after_rewrite and decide_apply_path, so monkeypatch.setattr is enough
 """
 from unittest.mock import patch
 
+import pytest
+
 import config
 import orchestrator
+
+
+@pytest.fixture(autouse=True)
+def _no_cover_letter_call(monkeypatch):
+    """Every apply path writes a cover letter; these routing tests must not
+    reach a real model for it."""
+    monkeypatch.setattr("agents.cover_letter_agent.generate_cover_letter",
+                        lambda *a, **k: {"text": "letter", "source": "template"})
 
 
 # ---- route_after_rewrite: pure routing function ----------------------------
@@ -112,7 +122,7 @@ def test_flag_on_low_fit_job_that_tailors_well_reaches_auto_submit(
     graph_app = orchestrator.build_graph()
     result = graph_app.invoke({"job": _job(), "cv_text": "original cv text"})
 
-    assert result["status"] == "auto_submitted"
+    assert result["status"] == "would_apply"  # DRY_RUN: recorded, not submitted
     mock_decide.assert_called_once()
     # Tailored score data must survive all the way through, even though the
     # graph kept going past rewrite_cv instead of stopping there.
@@ -192,5 +202,5 @@ def test_good_fit_job_auto_submits_via_real_decide_apply_path_in_any_mode(mock_s
         "cv_text": "already a great fit",
     })
 
-    assert result["status"] == "auto_submitted"
+    assert result["status"] == "would_apply"  # DRY_RUN: recorded, not submitted
     assert result["apply_path"] == "auto_submit"

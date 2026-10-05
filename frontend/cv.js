@@ -245,7 +245,7 @@ const debugResults = document.getElementById("debug-results");
 // it just sorts last.
 const BUCKET_ORDER = [
   "required_skills", "experience", "preferred_skills",
-  "responsibilities", "education",
+  "responsibilities", "education", "soft_skills",
 ];
 
 // Two independent axes: how the CV term relates to the requirement, and where

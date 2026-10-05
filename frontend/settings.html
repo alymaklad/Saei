@@ -156,7 +156,7 @@
         </button>
         <button type="button" data-mode="any" class="mode-card">
           <span class="mode-card-head"><span class="mode-card-title">Fully Autonomous</span><span class="provider-badge">High velocity</span></span>
-          <span class="mode-card-desc">Submits wherever a job clears your threshold, ignoring the whitelist. Real submission is still limited to hand-verified Greenhouse boards.</span>
+          <span class="mode-card-desc">Applies wherever a job clears your threshold, ignoring the whitelist. Email applications go out when the switch below is on; sites with application forms still become drafts, since none has a submitter yet.</span>
           <span class="mode-card-foot"><span class="ms text-[16px]">bolt</span>Still honours Dry Run while it's on</span>
         </button>
       </div>
@@ -203,6 +203,17 @@
           </span>
           <span class="toggle-switch">
             <input type="checkbox" id="toggle-auto-apply-tailored">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </span>
+        </label>
+        <label class="toggle-row rounded-lg bg-surface-container-lowest p-space-md shadow-soft">
+          <span class="toggle-text">
+            <span class="toggle-title">Send email applications for me</span>
+            <span class="toggle-desc">When a posting says “send your CV to …”, email that address your CV and a cover letter written from your profile, through your connected Gmail. Requires Review mode still drafts instead, and Dry Run only records what would have been sent.</span>
+          </span>
+          <span class="toggle-switch">
+            <input type="checkbox" id="toggle-auto-apply-email">
             <span class="toggle-track"></span>
             <span class="toggle-thumb"></span>
           </span>

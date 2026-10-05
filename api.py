@@ -85,12 +85,14 @@ def stats():
         total_apps = session.query(Application).count()
         pending = session.query(Application).filter(Application.status == "pending_review").count()
         auto_submitted = session.query(Application).filter(Application.status == "auto_submitted").count()
+        would_apply = session.query(Application).filter(Application.status == "would_apply").count()
         emails_sent = session.query(Application).filter(Application.email_sent.is_(True)).count()
     return {
         "total_jobs": total_jobs,
         "total_applications": total_apps,
         "pending_review": pending,
         "auto_submitted": auto_submitted,
+        "would_apply": would_apply,
         "emails_sent": emails_sent,
     }
 
@@ -133,6 +135,10 @@ def list_applications(limit: int = 100, status: Optional[str] = None):
                 "match_breakdown": _safe_json_loads(a.match_breakdown),
                 "status": a.status,
                 "cv_path": a.cv_version_path,
+                "cover_letter": a.cover_letter,
+                "cover_letter_source": a.cover_letter_source,
+                "apply_email": a.apply_email,
+                "apply_note": a.apply_note,
                 "email_sent": a.email_sent,
                 "date_created": a.date_created.isoformat() if a.date_created else None,
                 "date_applied": a.date_applied.isoformat() if a.date_applied else None,
@@ -261,6 +267,7 @@ def update_settings(body: SettingsUpdate):
 class AutoApplySettingsUpdate(BaseModel):
     auto_apply_mode: str
     auto_apply_on_tailored_score: bool
+    auto_apply_email: Optional[bool] = None
     fit_threshold: float
     ats_score_mode: Optional[str] = None
 
@@ -269,6 +276,8 @@ def _auto_apply_settings_payload() -> dict:
     return {
         "auto_apply_mode": config.AUTO_APPLY_MODE,
         "auto_apply_on_tailored_score": config.AUTO_APPLY_ON_TAILORED_SCORE,
+        "auto_apply_email": config.AUTO_APPLY_EMAIL,
+        "dry_run": config.DRY_RUN,
         "fit_threshold": config.FIT_THRESHOLD,
         "ats_score_mode": config.ATS_SCORE_MODE,
         "ats_score_modes": sorted(config.ATS_SCORE_MODES),
@@ -298,6 +307,8 @@ def update_auto_apply_settings(body: AutoApplySettingsUpdate):
         "FIT_THRESHOLD": str(body.fit_threshold),
         "ATS_SCORE_MODE": score_mode,
     }
+    if body.auto_apply_email is not None:
+        updates["AUTO_APPLY_EMAIL"] = "true" if body.auto_apply_email else "false"
     env_store.update_env_file(updates)
     for key, value in updates.items():
         os.environ[key] = value
@@ -955,6 +966,84 @@ def list_emails(limit: int = 100):
             }
             for e, a, j in rows
         ]
+
+
+class ApplyFromLinkRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/apply-from-link")
+def apply_from_link_endpoint(body: ApplyFromLinkRequest):
+    """Reads one pasted posting and runs it through the same pipeline a search
+    does (score, tailor, cover letter, draft/apply). Blocks for a minute or
+    so -- a few LLM calls."""
+    from jobs.apply_from_link import apply_from_link
+    import requests
+    from jobs.daily_run import _failure_kind
+    url = body.url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        return apply_from_link(url)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except requests.RequestException as exc:
+        raise HTTPException(400, f"Couldn't open that link: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        if _failure_kind(str(exc)) == "limit":
+            raise HTTPException(429, "The AI model's usage limit has run out, so this posting couldn't "
+                                     "be scored. Try again once it resets, or switch models in Settings.")
+        raise HTTPException(500, f"Couldn't process that posting: {exc}")
+
+
+@app.post("/api/applications/{application_id}/rescore")
+def rescore_application_endpoint(application_id: int):
+    """Recomputes one application's ATS scores (master and tailored CV) with
+    the current scoring rules. Reuses the stored requirements, so it's one
+    judging call per CV rather than a full re-extraction."""
+    from jobs.daily_run import _failure_kind
+    from jobs.rescore import rescore_application
+    try:
+        return rescore_application(application_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except RuntimeError as exc:
+        if _failure_kind(str(exc)) == "limit":
+            raise HTTPException(429, "The AI model's usage limit has run out, so this couldn't be "
+                                     "re-scored. Try again once it resets, or switch models in Settings.")
+        raise HTTPException(400, str(exc))
+    except Exception as exc:  # noqa: BLE001
+        if _failure_kind(str(exc)) == "limit":
+            raise HTTPException(429, "The AI model's usage limit has run out, so this couldn't be "
+                                     "re-scored. Try again once it resets, or switch models in Settings.")
+        raise HTTPException(500, f"Re-scoring failed: {exc}")
+
+
+@app.post("/api/applications/{application_id}/cover-letter")
+def generate_application_cover_letter(application_id: int):
+    """Writes (or rewrites) the cover letter for one application -- for jobs
+    that stopped before the apply step, or an older application."""
+    from agents.cover_letter_agent import generate_cover_letter
+    with get_session() as session:
+        row = (session.query(Application, Job).join(Job, Application.job_id == Job.id)
+               .filter(Application.id == application_id).first())
+        if not row:
+            raise HTTPException(404, "Application not found")
+        application, job = row
+        breakdown = _safe_json_loads(application.tailored_ats_breakdown or application.ats_breakdown) or {}
+        # Requirement-engine breakdowns hold the requirements in each bucket's
+        # items; the ones with credit are what the profile already evidences.
+        names = [item.get("name") for bucket in breakdown.values() if isinstance(bucket, dict)
+                 for item in bucket.get("items") or []
+                 if isinstance(item, dict) and (item.get("credit") or 0) > 0 and item.get("name")]
+        letter = generate_cover_letter(
+            profile_store.load_profile_dict(),
+            {"title": job.title, "company": job.company, "description": job.description},
+            requirement_names=names,
+        )
+        application.cover_letter = letter["text"]
+        application.cover_letter_source = letter["source"]
+        return {"cover_letter": letter["text"], "cover_letter_source": letter["source"]}
 
 
 class SendEmailRequest(BaseModel):

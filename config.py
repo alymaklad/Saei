@@ -264,6 +264,12 @@ AUTO_APPLY_MODE = _choice("AUTO_APPLY_MODE", AUTO_APPLY_MODES, "whitelist")
 # orchestrator.py:route_after_rewrite.
 AUTO_APPLY_ON_TAILORED_SCORE = _bool("AUTO_APPLY_ON_TAILORED_SCORE", False)
 
+# The email route (agents/apply_agent.py): when a posting says "send your CV to
+# <address>", email the CV and a cover letter there through the connected
+# Gmail instead of only drafting. Off by default. AUTO_APPLY_MODE="off" still
+# blocks it, and DRY_RUN still turns it into a "would have applied" record.
+AUTO_APPLY_EMAIL = _bool("AUTO_APPLY_EMAIL", False)
+
 # ATS fit threshold (orchestrator.py): the score, 0.0-1.0, below which a job's
 # CV gets rewritten instead of proceeding straight to the auto-apply
 # decision. User-configurable from the Settings page (default 0.7, matching
@@ -528,12 +534,21 @@ ATS_SCORE_MODE = _choice("ATS_SCORE_MODE", ATS_SCORE_MODES, "both")
 # redistributed proportionally across the rest (see _redistribute_weights).
 # Without that, a job with no stated education requirement would silently cap
 # at 90%, penalising the candidate for a requirement the employer never made.
+#
+# Soft skills are their own small bucket (2026-10-05). Inside required_skills
+# they were weighted like technical requirements' peers, and a posting listing
+# seven of them made them outweigh Python -- for things a CV rarely states in
+# words. They're judged from what the work shows (agents/soft_skills.py), and
+# worth 5%: real, but not what decides a technical role. The other five are
+# the original weights scaled by 0.95, so a posting that lists no soft skills
+# redistributes back to exactly the old weights and scores exactly as before.
 JOB_MATCH_WEIGHTS = {
-    "required_skills": 0.45,
-    "experience": 0.20,
-    "preferred_skills": 0.15,
-    "responsibilities": 0.10,
-    "education": 0.10,
+    "required_skills": 0.4275,
+    "experience": 0.19,
+    "preferred_skills": 0.1425,
+    "responsibilities": 0.095,
+    "education": 0.095,
+    "soft_skills": 0.05,
 }
 assert abs(sum(JOB_MATCH_WEIGHTS.values()) - 1.0) < 1e-9
 
@@ -656,6 +671,12 @@ def match_credit(relation: str, location: str) -> float:
 # Off -> alias table only: fully deterministic and free, but systematically
 # misses genuine matches phrased unusually.
 REQUIREMENT_ENTAILMENT = _bool("REQUIREMENT_ENTAILMENT", True)
+
+# Read the soft skills the profile's work demonstrates (one cached model call
+# per profile version, agents/soft_skills.py) and judge a posting's soft-skill
+# requirements against those lines. Off: soft skills are judged like any other
+# requirement, from lines retrieved by similarity.
+SOFT_SKILL_INFERENCE = _bool("SOFT_SKILL_INFERENCE", True)
 
 # Candidate CV spans retrieved per unmatched requirement before entailment.
 # All unmatched requirements are judged in ONE batched call, not one call

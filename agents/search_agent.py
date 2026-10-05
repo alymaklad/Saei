@@ -716,7 +716,18 @@ def enrich_linkedin(job: dict) -> dict | None:
     description = body.get_text("\n", strip=True)
     if criteria:
         description += "\n\n" + "\n".join(criteria)
-    return {**job, "description": description}
+    # The posting's own top card -- used when the caller has no title or
+    # company yet (a pasted link carries only the id). LinkedIn's regular job
+    # page can't be used for this: it often serves a sign-in wall instead.
+    top = {}
+    for key, selector in (("title", ".topcard__title"),
+                          ("company", "a.topcard__org-name-link, .topcard__flavor"),
+                          ("location", ".topcard__flavor--bullet")):
+        el = page.select_one(selector)
+        if el and el.get_text(strip=True):
+            top[key] = el.get_text(" ", strip=True)
+    filled = {k: v for k, v in top.items() if not job.get(k)}
+    return {**job, **filled, "description": description}
 
 
 def _already_saved(urls: list[str]) -> set[str]:

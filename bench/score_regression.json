@@ -69,7 +69,7 @@
         "cv_years": 1.2,
         "span_count": 13,
         "demonstrated_span_count": 8,
-        "inactive_buckets": ["responsibilities"],
+        "inactive_buckets": ["responsibilities", "soft_skills"],
         "missing_skills": [],
         "rows": {
           "Python":               {"relation": "implied", "location": "demonstrated", "credit": 0.9,  "points_earned": 9.0, "points": 10},

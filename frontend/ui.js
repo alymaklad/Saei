@@ -70,6 +70,8 @@ const STATUS_META = {
   // the user was notified instead of anything being submitted.
   cv_rewritten_notify_user: { label: "Tailored — notified", cls: "sa-chip-primary", icon: "edit_document" },
   auto_submitted: { label: "Auto-submitted", cls: "sa-chip-teal", icon: "task_alt" },
+  // Dry run: what WOULD have been submitted or emailed. Nothing was sent.
+  would_apply: { label: "Would have applied (dry run)", cls: "sa-chip", icon: "science" },
   sent: { label: "Emailed", cls: "sa-chip-teal", icon: "outgoing_mail" },
 };
 

@@ -49,6 +49,7 @@ const STATUS_CHIP = {
   pending_review: ["Ready to apply", "bg-primary-fixed/60 text-primary"],
   cv_rewritten_notify_user: ["Tailored", "bg-tertiary-fixed/60 text-on-tertiary-fixed-variant"],
   auto_submitted: ["Submitted", "bg-surface-container-high text-on-surface-variant"],
+  would_apply: ["Would have applied · dry run", "bg-secondary-container/60 text-on-secondary-fixed-variant"],
   sent: ["Emailed", "bg-surface-container-high text-on-surface-variant"],
 };
 
@@ -168,8 +169,8 @@ function renderDetail(a) {
   const [statusLabel, statusCls] = STATUS_CHIP[a.status] || ["", ""];
 
   let primary;
-  if (a.status === "pending_review") {
-    primary = `<button type="button" class="sa-btn-primary flex-1 py-3" id="submit-btn"><span class="ms text-[18px]">send</span>Submit Application<span class="ms text-[18px]">arrow_forward</span></button>`;
+  if (a.status === "pending_review" || a.status === "would_apply") {
+    primary = `<button type="button" class="sa-btn-primary flex-1 py-3" id="submit-btn"><span class="ms text-[18px]">send</span>${a.status === "would_apply" ? "Send it for real" : "Submit Application"}<span class="ms text-[18px]">arrow_forward</span></button>`;
   } else if (cvUrl) {
     primary = `<a href="${API_BASE}${cvUrl}" target="_blank" rel="noopener" class="sa-btn-primary flex-1 py-3"><span class="ms text-[18px]">download</span>Download tailored CV</a>`;
   } else {
@@ -197,7 +198,14 @@ function renderDetail(a) {
       </a>
     </div>
 
-    <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Overview</span>
+    <div class="flex items-center justify-between gap-space-sm">
+      <span class="text-label-sm uppercase tracking-wider text-on-surface-variant">Overview</span>
+      <button type="button" id="rescore-btn" title="Recompute this application's ATS score with the current scoring rules"
+              class="flex items-center gap-1 text-label-md text-primary hover:underline disabled:opacity-50">
+        <span class="ms text-[16px]">refresh</span>Re-score
+      </button>
+    </div>
+    <p id="rescore-message" class="hidden"></p>
     <div class="mb-space-lg mt-space-sm grid grid-cols-2 gap-space-sm">
       <div class="rounded-lg bg-surface-container-low p-space-sm">
         <span class="text-label-sm normal-case tracking-normal text-on-surface-variant">ATS score</span>
@@ -251,10 +259,109 @@ function renderDetail(a) {
       </div>
     </div>` : ""}
 
+    ${coverLetterCard(a)}
+
     <p class="text-body-sm text-on-surface">Found ${fmtDate(a.date_created)}${a.date_applied ? ` · applied ${fmtDate(a.date_applied)}` : ""}</p>`;
+
+  if (a.apply_note || a.apply_email) {
+    panel.querySelector("h2").insertAdjacentHTML("afterend", `
+      <p class="-mt-space-sm mb-space-md flex items-start gap-2 rounded-lg bg-surface-container-low px-space-sm py-2 text-body-sm text-on-surface-variant">
+        <span class="ms mt-0.5 text-[16px] text-primary">${a.apply_email ? "alternate_email" : "info"}</span>
+        <span>${escapeHtml(a.apply_note || `The posting asks for applications by email to ${a.apply_email}.`)}</span>
+      </p>`);
+  }
 
   const submit = document.getElementById("submit-btn");
   if (submit) submit.addEventListener("click", () => openSend(a));
+  wireCoverLetter(a);
+  wireRescore(a);
+}
+
+// ---- re-score ----------------------------------------------------------------------------
+// Scores are written when a job is processed; this recomputes one with the
+// current rules. The note survives the panel re-render that follows.
+let rescoreNote = null;   // {id, text, error}
+
+function wireRescore(a) {
+  const btn = document.getElementById("rescore-btn");
+  const msg = document.getElementById("rescore-message");
+  if (rescoreNote && rescoreNote.id === a.id) {
+    msg.className = `mt-1 text-body-sm ${rescoreNote.error ? "text-error" : "text-on-surface-variant"}`;
+    msg.textContent = rescoreNote.text;
+    rescoreNote = null;
+  }
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="ms animate-spin text-[16px]">progress_activity</span>Re-scoring…`;
+    msg.className = "mt-1 text-body-sm text-on-surface-variant";
+    msg.textContent = "Scoring your CV against this job again. This takes about half a minute.";
+    try {
+      const r = await postJSON(`/api/applications/${a.id}/rescore`, {});
+      const pctOf = (v) => (v == null ? "—" : `${Math.round(v * 100)}%`);
+      const parts = [`ATS ${pctOf(r.before.ats_score)} → ${pctOf(r.after.ats_score)}`];
+      if (r.tailored_rescored) parts.push(`tailored ${pctOf(r.before.tailored_ats_score)} → ${pctOf(r.after.tailored_ats_score)}`);
+      rescoreNote = { id: a.id, text: `Re-scored: ${parts.join(" · ")}.` };
+      await loadApplications(a.id);
+    } catch (err) {
+      rescoreNote = { id: a.id, text: err.message || "Couldn't re-score this application.", error: true };
+      renderDetail(a);
+    }
+  });
+}
+
+// ---- cover letter ---------------------------------------------------------------------
+
+function coverLetterCard(a) {
+  const letter = a.cover_letter || "";
+  return `
+    <div class="mb-space-lg rounded-xl bg-surface-container-low p-space-md">
+      <div class="mb-space-sm flex items-center justify-between gap-space-sm">
+        <span class="flex items-center gap-2 text-label-md font-semibold text-on-surface"><span class="ms text-[18px] text-primary">mail</span>Cover letter</span>
+        <span class="flex items-center gap-space-sm">
+          ${letter ? `<button type="button" class="text-label-md text-primary hover:underline" id="cl-copy">Copy</button>` : ""}
+          <button type="button" class="flex items-center gap-1 text-label-md text-primary hover:underline" id="cl-write">
+            <span class="ms text-[16px]">${letter ? "refresh" : "edit_note"}</span>${letter ? "Rewrite" : "Write one"}
+          </button>
+        </span>
+      </div>
+      ${letter ? `
+        <details class="group">
+          <summary class="cursor-pointer list-none text-body-sm text-on-surface-variant">
+            <span class="line-clamp-2 group-open:hidden">${escapeHtml(letter)}</span>
+            <span class="text-label-md text-primary group-open:hidden">Read it</span>
+          </summary>
+          <p class="whitespace-pre-line text-body-sm text-on-surface">${escapeHtml(letter)}</p>
+        </details>
+        ${a.cover_letter_source === "template" ? `<p class="mt-space-sm text-label-sm normal-case tracking-normal text-on-surface-variant">Written from a template because the AI model wasn't available. Rewrite it once the model is back.</p>` : ""}`
+      : `<p class="text-body-sm text-on-surface-variant">None yet. Sa'ei writes one when a job is drafted or applied for, from your profile only.</p>`}
+      <span class="save-message mt-1 block" id="cl-message"></span>
+    </div>`;
+}
+
+function wireCoverLetter(a) {
+  const copy = document.getElementById("cl-copy");
+  if (copy) copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(a.cover_letter); copy.textContent = "Copied"; }
+    catch (e) { copy.textContent = "Copy failed"; }
+  });
+  const write = document.getElementById("cl-write");
+  if (!write) return;
+  write.addEventListener("click", async () => {
+    const msg = document.getElementById("cl-message");
+    write.disabled = true;
+    msg.textContent = "Writing…";
+    msg.className = "save-message mt-1 block";
+    try {
+      const r = await postJSON(`/api/applications/${a.id}/cover-letter`, {});
+      a.cover_letter = r.cover_letter;
+      a.cover_letter_source = r.cover_letter_source;
+      renderDetail(a);
+    } catch (err) {
+      msg.textContent = err.message || "Couldn't write the letter.";
+      msg.className = "save-message save-error mt-1 block";
+      write.disabled = false;
+    }
+  });
 }
 
 function select(id) {
@@ -275,10 +382,10 @@ function openSend(a) {
   const title = a.title || "this role";
   const company = a.company || "your company";
   document.getElementById("send-title").textContent = `${title} · ${company}`;
-  document.getElementById("to-email").value = "";
+  document.getElementById("to-email").value = a.apply_email || "";
   document.getElementById("subject").value = `Application for ${title} at ${company}`;
-  document.getElementById("body").value =
-    `Hello,\n\nI'd like to apply for the ${title} position at ${company}. My CV is attached.\n\nBest regards,`;
+  document.getElementById("body").value = a.cover_letter
+    || `Hello,\n\nI'd like to apply for the ${title} position at ${company}. My CV is attached.\n\nBest regards,`;
   // Mirrors the send endpoint in api.py: it attaches the application's own
   // CV version when one was written, otherwise the master CV.
   const cvUrl = cvDownloadUrl(a.cv_path);
@@ -297,7 +404,7 @@ function openSend(a) {
   sendMessage.className = "save-message mr-auto";
   sendBtn.disabled = false;
   sendModal.hidden = false;
-  document.getElementById("to-email").focus();
+  document.getElementById(a.apply_email ? "subject" : "to-email").focus();
 }
 
 function closeSend() { sendModal.hidden = true; sending = null; }
@@ -361,6 +468,37 @@ async function loadApplications(keepId) {
   const first = visibleApps()[0];
   if (first) select(first.id); else { renderList(); renderDetail(null); }
 }
+
+// ---- apply from a link ---------------------------------------------------------------------
+
+document.getElementById("link-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = document.getElementById("link-url");
+  const btn = document.getElementById("link-btn");
+  const msg = document.getElementById("link-message");
+  const url = input.value.trim();
+  if (!url) return;
+  btn.disabled = true;
+  msg.className = "mt-space-sm flex items-start gap-2 text-body-sm text-on-surface-variant";
+  msg.innerHTML = `<span class="ms text-[16px] animate-spin">progress_activity</span><span>Reading the posting, scoring it and writing your CV and cover letter. This takes a minute or so.</span>`;
+  try {
+    const r = await postJSON("/api/apply-from-link", { url });
+    const word = { pending_review: "ready for you to send", would_apply: "recorded as a dry run",
+                   sent: "emailed", cv_rewritten_notify_user: "scored and tailored",
+                   already_processed: "already on your list" }[r.status] || (r.status || "").replace(/_/g, " ");
+    msg.className = "mt-space-sm flex items-start gap-2 text-body-sm text-on-surface";
+    msg.innerHTML = `<span class="ms text-[16px] text-primary">check_circle</span><span>${escapeHtml(`${r.title}${r.company ? ` at ${r.company}` : ""}: ${word}.`)}</span>`;
+    input.value = "";
+    statusFilter = "all";
+    document.querySelectorAll("#status-tabs .sa-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.filter === "all"));
+    await loadApplications(r.application_id || undefined);
+  } catch (err) {
+    msg.className = "mt-space-sm flex items-start gap-2 text-body-sm text-error";
+    msg.innerHTML = `<span class="ms text-[16px]">error</span><span>${escapeHtml(err.message || "Couldn't process that link.")}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 getJSON("/api/email/status").then((s) => { gmail = s; }).catch(() => { gmail = null; });
 loadApplications();

@@ -16,6 +16,18 @@
       <p class="sa-page-desc">Track, review, and send tailored applications — every score explained requirement by requirement.</p>
     </div>
 
+    <!-- Apply from a link: one posting through the same pipeline a search runs -->
+    <section class="sa-card mb-space-lg p-space-md">
+      <form id="link-form" class="flex items-center gap-space-sm">
+        <span class="sa-icon-badge flex-shrink-0"><span class="ms">add_link</span></span>
+        <label for="link-url" class="sr-only">Job posting URL</label>
+        <input type="url" id="link-url" class="sa-input flex-1" required
+               placeholder="Paste a job posting link: LinkedIn, Greenhouse, Lever, Ashby or any careers page">
+        <button type="submit" class="sa-btn-primary whitespace-nowrap" id="link-btn"><span class="ms text-[18px]">bolt</span>Prepare application</button>
+      </form>
+      <p id="link-message" class="hidden"></p>
+    </section>
+
     <div class="mb-space-lg flex flex-wrap items-center justify-between gap-space-md">
       <div class="sa-tabs" id="status-tabs">
         <button type="button" class="sa-tab is-active" data-filter="all">All <span class="ml-1 opacity-70" data-count="all"></span></button>
